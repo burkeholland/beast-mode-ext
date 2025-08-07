@@ -1,10 +1,30 @@
-// The module 'vscode' contains the VS Code extensibility API
-// Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
+
+interface SettingDefinition {
+	key: string;
+	type: 'boolean' | 'number' | 'string';
+	description: string;
+	group: string;
+	min?: number;
+	max?: number;
+	step?: number;
+}
+
+interface KeybindingEntry {
+	command: string;
+	title: string;
+	default?: string;
+	when?: string;
+	current?: string;
+}
 
 interface SettingsState {
-	autoApprove: boolean;
-	maxRequests: number;
+	settings: Record<string, any>;
+	definitions: SettingDefinition[];
+	groups: string[];
+	keybindings: KeybindingEntry[];
 }
 
 class UltimateAiSettingsWebviewProvider implements vscode.WebviewViewProvider {
@@ -13,54 +33,138 @@ class UltimateAiSettingsWebviewProvider implements vscode.WebviewViewProvider {
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
+	private readonly settingDefinitions: SettingDefinition[] = [
+		{ key: 'chat.tools.autoApprove', type: 'boolean', description: 'Automatically approve tool results without prompting.', group: 'Chat Agent' },
+		{ key: 'chat.agent.maxRequests', type: 'number', description: 'Maximum concurrent agent requests.', group: 'Chat Agent', min: 1, step: 1 },
+		{ key: 'workbench.sideBar.location', type: 'string', description: 'Location of the primary sidebar (left or right).', group: 'Workbench' },
+		{ key: 'workbench.colorTheme', type: 'string', description: 'Current color theme.', group: 'Appearance' },
+		{ key: 'editor.minimap.enabled', type: 'boolean', description: 'Controls whether the minimap is shown.', group: 'Editor' },
+		{ key: 'terminal.integrated.tabs.location', type: 'string', description: 'Location of the terminal tabs (left|right).', group: 'Terminal' },
+	];
+
 	resolveWebviewView(webviewView: vscode.WebviewView): void | Thenable<void> {
 		this.view = webviewView;
 		webviewView.webview.options = {
 			enableScripts: true,
-			localResourceRoots: [this.context.extensionUri]
+			localResourceRoots: [vscode.Uri.file(path.join(this.context.extensionPath, 'media'))]
 		};
-		webviewView.webview.html = this.getHtml(this.getState());
-
-		webviewView.webview.onDidReceiveMessage(async (msg) => {
-			switch (msg.type) {
-				case 'updateSetting':
-					await this.updateSetting(msg.key, msg.value);
-					break;
-				case 'requestState':
-					this.postState();
-					break;
-			}
-		});
+		webviewView.webview.onDidReceiveMessage(msg => this.handleMessage(msg));
+		this.postState();
 	}
 
-	refresh() { this.postState(); }
-
-	private getState(): SettingsState {
-		const config = vscode.workspace.getConfiguration();
-		return {
-			autoApprove: config.get<boolean>('chat.tools.autoApprove', false) ?? false,
-			maxRequests: config.get<number>('chat.agent.maxRequests', 5) ?? 5
-		};
-	}
-
-	private postState() {
-		if (this.view) {
-			this.view.webview.postMessage({ type: 'state', state: this.getState() });
+	private handleMessage(message: any) {
+		switch (message.type) {
+			case 'ready':
+				this.postState();
+				break;
+			case 'updateSetting':
+				this.updateSetting(message.key, message.value);
+				break;
+			case 'updateKeybinding':
+				this.updateKeybinding(message.command, message.key);
+				break;
 		}
 	}
 
-	private async updateSetting(key: string, value: any) {
-		const config = vscode.workspace.getConfiguration();
-		if (key === 'chat.agent.maxRequests') {
-			const num = Number(value);
-			if (!Number.isInteger(num) || num < 1) {
-				vscode.window.showErrorMessage('Max Requests must be an integer >= 1');
-				this.postState();
+	private getConfiguration() {
+		return vscode.workspace.getConfiguration();
+	}
+
+	private postState() {
+			if (!this.view) {
 				return;
 			}
-			await config.update(key, num, vscode.ConfigurationTarget.Global);
-		} else if (key === 'chat.tools.autoApprove') {
-			await config.update(key, !!value, vscode.ConfigurationTarget.Global);
+		const state: SettingsState = {
+			settings: this.collectCurrentSettings(),
+			definitions: this.settingDefinitions,
+			groups: Array.from(new Set(this.settingDefinitions.map(d => d.group))),
+			keybindings: this.collectKeybindings()
+		};
+		this.view.webview.html = this.getHtml(state);
+	}
+
+	private collectCurrentSettings(): Record<string, any> {
+		const config = this.getConfiguration();
+		const out: Record<string, any> = {};
+		for (const def of this.settingDefinitions) {
+			out[def.key] = config.get(def.key);
+		}
+		return out;
+	}
+
+	private collectKeybindings(): KeybindingEntry[] {
+		const contrib = vscode.extensions.getExtension(this.context.extension.id)?.packageJSON?.contributes;
+		const declared: any[] = contrib?.keybindings || [];
+		const commands: any[] = contrib?.commands || [];
+		// Attempt to read user keybindings.json to get overrides
+		let overrides: Record<string, string> = {};
+		const userKbPath = this.getUserKeybindingsPath();
+		if (userKbPath && fs.existsSync(userKbPath)) {
+			try {
+				const raw = fs.readFileSync(userKbPath, 'utf8');
+				const sanitized = raw.replace(/\/\*[\s\S]*?\*\/|(^|\n)\s*\/\/.*$/g, '$1');
+				const arr = JSON.parse(sanitized);
+				if (Array.isArray(arr)) {
+					for (const e of arr) {
+									if (e && e.command && e.key) {
+										overrides[e.command] = e.key;
+									}
+					}
+				}
+			} catch { /* ignore */ }
+		}
+		return declared.map(kb => {
+			const cmdMeta = commands.find(c => c.command === kb.command);
+			return {
+				command: kb.command,
+				title: cmdMeta?.title || kb.command,
+				default: kb.key,
+				when: kb.when,
+				current: overrides[kb.command] || kb.key
+			} as KeybindingEntry;
+		});
+	}
+
+	private getUserKeybindingsPath(): string | undefined {
+		const appName = process.platform === 'darwin' ? 'Code' : (process.env.VSCODE_CWD?.includes('oss') ? 'Code - OSS' : 'Code');
+		const home = process.env.HOME || process.env.USERPROFILE;
+			if (!home) {
+				return undefined;
+			}
+			if (process.platform === 'win32') {
+				return path.join(home, 'AppData', 'Roaming', appName, 'User', 'keybindings.json');
+			}
+			if (process.platform === 'darwin') {
+				return path.join(home, 'Library', 'Application Support', appName, 'User', 'keybindings.json');
+			}
+		return path.join(home, '.config', appName, 'User', 'keybindings.json');
+	}
+
+	private async updateSetting(key: string, value: any) {
+		await this.getConfiguration().update(key, value, vscode.ConfigurationTarget.Global);
+		this.postState();
+	}
+
+	private async updateKeybinding(command: string, key: string) {
+		const filePath = this.getUserKeybindingsPath();
+		if (!filePath) {
+			vscode.window.showErrorMessage('Unable to resolve user keybindings path');
+			return;
+		}
+		let content = '[]';
+		try { if (fs.existsSync(filePath)) { content = fs.readFileSync(filePath, 'utf8'); } } catch { /* ignore */ }
+		const sanitized = content.replace(/\/\*[\s\S]*?\*\/|(^|\n)\s*\/\/.*$/g, '$1');
+		let arr: any[] = [];
+		try { const parsed = JSON.parse(sanitized); if (Array.isArray(parsed)) { arr = parsed; } } catch { /* ignore */ }
+		// Remove prior entries for command so new one is last (highest priority)
+		arr = arr.filter(e => e && e.command !== command);
+		arr.push({ key, command });
+		const newText = JSON.stringify(arr, null, 2);
+		try {
+			fs.writeFileSync(filePath, newText, 'utf8');
+			vscode.window.showInformationMessage(`Keybinding updated: ${key} → ${command}`);
+		} catch (e:any) {
+			vscode.window.showErrorMessage('Failed to write keybindings.json: ' + (e?.message || e));
 		}
 		this.postState();
 	}
@@ -72,165 +176,68 @@ class UltimateAiSettingsWebviewProvider implements vscode.WebviewViewProvider {
 			`style-src ${this.getWebviewCspSource()} 'unsafe-inline'`,
 			`script-src 'nonce-${nonce}'`
 		].join('; ');
-		return /* html */ `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8" />
-<meta http-equiv="Content-Security-Policy" content="${csp}" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<style>
-	body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 4px 8px 12px; }
-	h2 { font-size: 13px; font-weight: 600; margin: 4px 0 8px; }
-	.settings-list { border: 1px solid var(--vscode-tree-indentGuidesStroke, var(--vscode-widget-border, transparent)); border-radius: 6px; overflow: hidden; }
-	.setting { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--vscode-tree-indentGuidesStroke, var(--vscode-widget-border, transparent)); }
-	.setting:last-child { border-bottom: none; }
-	.setting-main { flex: 1; min-width: 0; }
-	.setting-main label { font-weight: 500; display: inline-block; margin-bottom: 2px; }
-	.desc { font-size: 11px; opacity: .75; line-height: 1.3; }
-	input[type=number] { width: 90px; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 4px; padding: 2px 6px; height: 24px; outline: none; }
-	input[type=number]:focus { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 1px var(--vscode-focusBorder); }
-	input[type=number].number-invalid { border-color: var(--vscode-inputValidation-errorBorder); box-shadow: 0 0 0 1px var(--vscode-inputValidation-errorBorder); }
-	/* Toggle switch */
-	.switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
-	.switch input { opacity:0; width:0; height:0; }
-	.slider { position:absolute; inset:0; cursor:pointer; background: var(--vscode-input-background); transition:.18s ease; border:1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 20px; box-sizing: border-box; }
-	.slider:before { content:""; position:absolute; height:14px; width:14px; left:2px; top:2px; background: var(--vscode-editor-background, #fff); transition:.18s ease; border-radius:50%; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
-	.switch input:focus + .slider { outline: 1px solid var(--vscode-focusBorder); }
-	.switch input:checked + .slider { background: var(--vscode-button-background, var(--vscode-statusBarItem-prominentBackground)); border-color: var(--vscode-button-border, var(--vscode-button-background)); }
-	.switch input:checked + .slider:before { transform: translateX(16px); }
-	.switch input:active + .slider:before { width:15px; }
-	.setting:hover { background: var(--vscode-list-hoverBackground); }
-	@media (prefers-reduced-motion: reduce) { .slider, .slider:before { transition:none; } }
-</style>
-</head>
-<body>
-	<h2>Ultimate AI Settings</h2>
-	<div class="settings-list">
-		<div class="setting">
-			<div class="setting-main">
-				<label for="autoApprove">Auto Approve</label>
-				<div class="desc">Automatically approve tool results without prompting.</div>
-			</div>
-			<label class="switch" title="Toggle auto approve">
-				<input id="autoApprove" type="checkbox" ${state.autoApprove ? 'checked' : ''} />
-				<span class="slider"></span>
-			</label>
-		</div>
-		<div class="setting">
-			<div class="setting-main">
-				<label for="maxRequests">Max Requests</label>
-				<div class="desc">Maximum concurrent agent requests.</div>
-			</div>
-			<input id="maxRequests" type="number" min="1" step="1" value="${state.maxRequests}" />
-		</div>
-	</div>
-<script nonce="${nonce}">
-const vscode = acquireVsCodeApi();
-const autoApproveEl = document.getElementById('autoApprove');
-const maxReqEl = document.getElementById('maxRequests');
-
-autoApproveEl.addEventListener('change', () => {
-	vscode.postMessage({ type: 'updateSetting', key: 'chat.tools.autoApprove', value: autoApproveEl.checked });
-});
-
-let maxReqDebounce;
-maxReqEl.addEventListener('input', () => {
-	clearTimeout(maxReqDebounce);
-	const val = maxReqEl.value.trim();
-	const num = Number(val);
-	if (!Number.isInteger(num) || num < 1) {
-		maxReqEl.classList.add('number-invalid');
-		return;
-	}
-	maxReqEl.classList.remove('number-invalid');
-	maxReqDebounce = setTimeout(() => {
-		vscode.postMessage({ type: 'updateSetting', key: 'chat.agent.maxRequests', value: num });
-	}, 300);
-});
-
-window.addEventListener('message', e => {
-   const message = e.data;
-   if (message.type === 'state') {
-	   autoApproveEl.checked = message.state.autoApprove;
-	   maxReqEl.value = message.state.maxRequests;
-   }
-});
-
-// In case extension wants updated state
-vscode.postMessage({ type: 'requestState' });
-</script>
-</body>
-</html>`;
-	}
-
-	private getNonce() {
-		const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-		let v = '';
-		for (let i = 0; i < 16; i++) { v += chars.charAt(Math.floor(Math.random() * chars.length)); }
-		return v;
+		const templatePath = path.join(this.context.extensionPath, 'media', 'settingsWebview.html');
+		let html: string;
+		try {
+			html = fs.readFileSync(templatePath, 'utf8');
+		} catch (e) {
+			return `<html><body><h3>Failed to load settings template.</h3><pre>${(e as any)?.message || e}</pre></body></html>`;
+		}
+		return html
+			.replace(/%%CSP%%/g, csp)
+			.replace(/%%NONCE%%/g, nonce)
+			.replace(/%%STATE_JSON%%/g, () => JSON.stringify(state));
 	}
 
 	private getWebviewCspSource() {
-		// Convenience wrapper for future adjustments
-		return this.view?.webview.cspSource ?? 'vscode-resource:';
+		return this.view?.webview.cspSource || 'vscode-resource:';
+	}
+
+	private getNonce() {
+		let text = '';
+		const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+		for (let i = 0; i < 32; i++) {
+			text += possible.charAt(Math.floor(Math.random() * possible.length));
+		}
+		return text;
 	}
 }
 
-// This method is called when your extension is activated
-// Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-
-	// Use the console to output diagnostic information (console.log) and errors (console.error)
-	// This line of code will only be executed once when your extension is activated
-	console.log('Congratulations, your extension "ultimate-ai" is now active!');
-
-	// The command has been defined in the package.json file
-	// Now provide the implementation of the command with registerCommand
-	// The commandId parameter must match the command field in package.json
-	const settingsWebviewProvider = new UltimateAiSettingsWebviewProvider(context);
-	vscode.window.registerWebviewViewProvider(UltimateAiSettingsWebviewProvider.viewType, settingsWebviewProvider);
+	const provider = new UltimateAiSettingsWebviewProvider(context);
+	context.subscriptions.push(
+		vscode.window.registerWebviewViewProvider(UltimateAiSettingsWebviewProvider.viewType, provider)
+	);
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand('ultimate-ai.helloWorld', () => {
-			vscode.window.showInformationMessage('Hello World from Ultimate AI!');
-		}),
-		vscode.commands.registerCommand('ultimate-ai.refreshSettings', () => settingsWebviewProvider.refresh()),
-		vscode.commands.registerCommand('ultimate-ai.toggleAutoApprove', async () => {
-			// Retained for backwards compatibility; delegates to webview logic
+		vscode.commands.registerCommand('beast-mode.refreshSettings', () => provider['postState']?.())
+	);
+
+	context.subscriptions.push(
+		vscode.commands.registerCommand('beast-mode.toggleAutoApprove', async () => {
 			const config = vscode.workspace.getConfiguration();
-			const current = config.get<boolean>('chat.tools.autoApprove', false);
-			await config.update('chat.tools.autoApprove', !current, vscode.ConfigurationTarget.Global);
-			settingsWebviewProvider.refresh();
-		}),
-		vscode.commands.registerCommand('ultimate-ai.setMaxRequests', async () => {
-			const config = vscode.workspace.getConfiguration();
-			const current = config.get<number>('chat.agent.maxRequests', 5);
-			const value = await vscode.window.showInputBox({
-				prompt: 'Set Max Requests',
-				value: String(current),
-				validateInput: (val) => {
-					const num = Number(val);
-					if (!Number.isInteger(num) || num < 1) {
-						return 'Enter an integer >= 1';
-					}
-					return null;
-				}
-			});
-			if (value) {
-				await config.update('chat.agent.maxRequests', Number(value), vscode.ConfigurationTarget.Global);
-				settingsWebviewProvider.refresh();
-			}
+			const cur = config.get<boolean>('chat.tools.autoApprove');
+			await config.update('chat.tools.autoApprove', !cur, vscode.ConfigurationTarget.Global);
+			vscode.window.showInformationMessage(`Auto Approve is now ${!cur ? 'Enabled' : 'Disabled'}`);
+			provider['postState']?.();
 		})
 	);
 
 	context.subscriptions.push(
-		vscode.workspace.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration('chat.tools.autoApprove') || e.affectsConfiguration('chat.agent.maxRequests')) {
-				settingsWebviewProvider.refresh();
+		vscode.commands.registerCommand('beast-mode.setMaxRequests', async () => {
+			const config = vscode.workspace.getConfiguration();
+			const cur = config.get<number>('chat.agent.maxRequests') || 1;
+			const val = await vscode.window.showInputBox({
+				title: 'Set Max Agent Requests',
+				value: String(cur),
+				validateInput: v => /^(\d+)$/.test(v) ? undefined : 'Enter a positive integer'
+			});
+			if (val) {
+				await config.update('chat.agent.maxRequests', parseInt(val, 10), vscode.ConfigurationTarget.Global);
+				provider['postState']?.();
 			}
 		})
 	);
 }
 
-// This method is called when your extension is deactivated
 export function deactivate() {}

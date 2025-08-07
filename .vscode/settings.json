@@ -7,5 +7,44 @@
 		"out": true // set this to false to include "out" folder in search results
 	},
 	// Turn off tsc task auto detection since we have the necessary tasks as npm scripts
-	"typescript.tsc.autoDetect": "off"
+	"typescript.tsc.autoDetect": "off",
+  "github.copilot.chat.agent.enabled": true,
+  "workbench.iconTheme": "material-icon-theme",
+  "terminal.integrated.fontFamily": "CaskaydiaCove Nerd Font Mono",
+  "workbench.activityBar.location": "top",
+  "chat.agent.maxRequests": 500,
+  "workbench.colorTheme": "Cobalt2",
+  "workbench.productIconTheme": "material-product-icons",
+  "git.confirmSync": false,
+  "git.autofetch": true,
+  "github.copilot.chat.commitMessageGeneration.instructions": [
+    {
+      "text": "Begin the commit message with a single short (no more than 50 characters) line summarizing the change, followed by a blank line and then a more thorough description."
+    }
+  ],
+  "github.copilot.nextEditSuggestions.enabled": true,
+  "terminal.integrated.suggest.quickSuggestions": {
+    "commands": "on",
+    "arguments": "on",
+    "unknown": "off"
+  },
+  "githubPullRequests.codingAgent.enabled": true,
+  "githubPullRequests.experimental.chat": true,
+  "githubPullRequests.codingAgent.autoCommitAndPush": true,
+  "githubPullRequests.pushBranch": "always",
+  "chat.commandCenter.enabled": false,
+  "window.commandCenter": false,
+  "chat.instructionsFilesLocations": {
+    ".github/instructions": true,
+    "/tmp/postman-collections-post-response.instructions.md": true,
+    "/tmp/postman-collections-pre-request.instructions.md": true,
+    "/tmp/postman-folder-post-response.instructions.md": true,
+    "/tmp/postman-folder-pre-request.instructions.md": true,
+    "/tmp/postman-http-request-post-response.instructions.md": true,
+    "/tmp/postman-http-request-pre-request.instructions.md": true
+  },
+  "chat.todoListTool.enabled": true,
+  "githubPullRequests.codingAgent.uiIntegration": true,
+  "workbench.secondarySideBar.defaultVisibility": "hidden",
+  "chat.editor.wordWrap": "on"
 }

@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="%%CSP%%" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Beast Mode Settings</title>
+    <style>
+        body { font-family: var(--vscode-font-family); color: var(--vscode-foreground); padding: 4px 8px 32px; }
+        h1 { font-size:14px; margin:4px 0 12px; }
+        h2 { font-size: 13px; font-weight: 600; margin: 12px 0 6px; text-transform: uppercase; opacity:.8; }
+        .section { margin-bottom: 14px; }
+        .settings-list { border: 1px solid var(--vscode-tree-indentGuidesStroke, var(--vscode-widget-border, transparent)); border-radius: 6px; overflow: hidden; }
+        .setting { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--vscode-tree-indentGuidesStroke, var(--vscode-widget-border, transparent)); }
+        .setting:last-child { border-bottom: none; }
+        .setting-main { flex: 1; min-width: 0; }
+        .setting-main label { font-weight: 500; display: inline-block; margin-bottom: 2px; }
+        .desc { font-size: 11px; opacity: .75; line-height: 1.3; }
+        input[type=number], input[type=text] { width: 140px; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 4px; padding: 2px 6px; height: 24px; outline: none; }
+        input[type=number]:focus, input[type=text]:focus { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 1px var(--vscode-focusBorder); }
+        input.number-invalid { border-color: var(--vscode-inputValidation-errorBorder); box-shadow: 0 0 0 1px var(--vscode-inputValidation-errorBorder); }
+        .switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+        .switch input { opacity:0; width:0; height:0; }
+        .slider { position:absolute; inset:0; cursor:pointer; background: var(--vscode-input-background); transition:.18s ease; border:1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 20px; box-sizing: border-box; }
+        .slider:before { content:""; position:absolute; height:14px; width:14px; left:2px; top:2px; background: var(--vscode-editor-background, #fff); transition:.18s ease; border-radius:50%; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+        .switch input:focus + .slider { outline: 1px solid var(--vscode-focusBorder); }
+        .switch input:checked + .slider { background: var(--vscode-button-background, var(--vscode-statusBarItem-prominentBackground)); border-color: var(--vscode-button-border, var(--vscode-button-background)); }
+        .switch input:checked + .slider:before { transform: translateX(16px); }
+        .switch input:active + .slider:before { width:15px; }
+        .setting:hover { background: var(--vscode-list-hoverBackground); }
+        .keybinding-list .setting-main label { margin:0; }
+        kbd { font: 11px/1 var(--vscode-font-family); background: var(--vscode-editor-background); padding:2px 6px; border:1px solid var(--vscode-widget-border); border-radius:4px; }
+        button.inline { background: var(--vscode-button-secondaryBackground, var(--vscode-button-background)); color: var(--vscode-button-foreground); border:1px solid var(--vscode-button-border, transparent); border-radius:4px; height:24px; padding:0 8px; cursor:pointer; }
+        button.inline:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-secondaryHoverBackground)); }
+        .capture-overlay { position: fixed; inset:0; background: rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:10; }
+        .capture-box { background: var(--vscode-editor-background); padding:24px 28px; border:1px solid var(--vscode-widget-border); border-radius:8px; text-align:center; width:320px; }
+        .capture-box h3 { margin:0 0 12px; font-size:14px; }
+        .capture-display { font-size:16px; margin:8px 0 12px; min-height:22px; }
+    </style>
+</head>
+<body>
+    <h1>Beast Mode Configuration</h1>
+    <div id="settingsContainer"></div>
+    <div class="section">
+      <h2>Keybindings</h2>
+      <div class="settings-list keybinding-list" id="keybindingsContainer"></div>
+    </div>
+    <div class="capture-overlay" id="captureOverlay" role="dialog" aria-modal="true">
+      <div class="capture-box">
+        <h3>Press new shortcut</h3>
+        <div class="capture-display" id="captureDisplay"></div>
+        <div style="display:flex; gap:8px; justify-content:center; margin-top:4px;">
+          <button class="inline" id="captureConfirm" disabled>Confirm</button>
+          <button class="inline" id="captureCancel">Cancel</button>
+        </div>
+      </div>
+    </div>
+    <script nonce="%%NONCE%%">
+        const vscode = acquireVsCodeApi();
+        let currentState = %%STATE_JSON%%;
+        function render(){
+          const container=document.getElementById('settingsContainer');
+          container.innerHTML='';
+          for(const group of currentState.groups){
+            const section=document.createElement('div'); section.className='section';
+            const h2=document.createElement('h2'); h2.textContent=group; section.appendChild(h2);
+            const list=document.createElement('div'); list.className='settings-list';
+            for(const def of currentState.definitions.filter(d=>d.group===group)) list.appendChild(renderSetting(def));
+            section.appendChild(list); container.appendChild(section);
+          }
+          renderKeybindings();
+        }
+        function renderSetting(def){
+          const value=currentState.settings[def.key];
+          const row=document.createElement('div'); row.className='setting';
+          const main=document.createElement('div'); main.className='setting-main';
+          const label=document.createElement('label'); label.textContent=def.key.split('.').slice(-1)[0]; main.appendChild(label);
+          const desc=document.createElement('div'); desc.className='desc'; desc.textContent=def.description; main.appendChild(desc);
+          row.appendChild(main);
+          if(def.type==='boolean'){
+            const wrap=document.createElement('label'); wrap.className='switch';
+            const input=document.createElement('input'); input.type='checkbox'; input.checked=!!value;
+            input.addEventListener('change',()=>vscode.postMessage({type:'updateSetting', key:def.key, value:input.checked}));
+            const slider=document.createElement('span'); slider.className='slider';
+            wrap.appendChild(input); wrap.appendChild(slider); row.appendChild(wrap);
+          } else if(def.type==='number'){
+            const input=document.createElement('input'); input.type='number'; if(def.min!==undefined) input.min=def.min; if(def.step!==undefined) input.step=def.step; input.value=value??'';
+            let debounce; input.addEventListener('input',()=>{ clearTimeout(debounce); const num=Number(input.value); if(!Number.isInteger(num) || (def.min!==undefined && num<def.min)){ input.classList.add('number-invalid'); return;} input.classList.remove('number-invalid'); debounce=setTimeout(()=>vscode.postMessage({type:'updateSetting', key:def.key, value:num}),300);});
+            row.appendChild(input);
+          } else {
+            const input=document.createElement('input'); input.type='text'; input.value=value??''; let debounce; input.addEventListener('input',()=>{ clearTimeout(debounce); debounce=setTimeout(()=>vscode.postMessage({type:'updateSetting', key:def.key, value:input.value}),400);}); row.appendChild(input);
+          }
+          return row;
+        }
+        function renderKeybindings(){
+          const container=document.getElementById('keybindingsContainer'); container.innerHTML='';
+          for(const kb of currentState.keybindings){
+            const row=document.createElement('div'); row.className='setting';
+            const main=document.createElement('div'); main.className='setting-main';
+            const label=document.createElement('label'); label.textContent=kb.title; main.appendChild(label);
+            const desc=document.createElement('div'); desc.className='desc'; desc.textContent=kb.command; main.appendChild(desc);
+            row.appendChild(main);
+            const right=document.createElement('div'); right.style.display='flex'; right.style.gap='6px'; right.style.alignItems='center';
+            const k=document.createElement('kbd'); k.textContent=kb.current||'Unassigned'; right.appendChild(k);
+            const btn=document.createElement('button'); btn.className='inline'; btn.textContent='Change'; btn.addEventListener('click',()=>openCapture(kb.command)); right.appendChild(btn);
+            row.appendChild(right); container.appendChild(row);
+          }
+        }
+        let captureCommand=null; let capturedSeq=null;
+        const overlay=document.getElementById('captureOverlay');
+        const display=document.getElementById('captureDisplay');
+        const confirmBtn=document.getElementById('captureConfirm');
+        const cancelBtn=document.getElementById('captureCancel');
+        cancelBtn.addEventListener('click',closeCapture);
+        confirmBtn.addEventListener('click',()=>{ if(captureCommand && capturedSeq){ vscode.postMessage({type:'updateKeybinding', command:captureCommand, key:capturedSeq}); closeCapture(); }});
+        function openCapture(command){ captureCommand=command; capturedSeq=null; confirmBtn.disabled=true; display.textContent=''; overlay.style.display='flex'; overlay.focus(); }
+        function closeCapture(){ overlay.style.display='none'; captureCommand=null; }
+        overlay.addEventListener('keydown',ev=>{ ev.preventDefault(); ev.stopPropagation(); const parts=[]; if(ev.ctrlKey) parts.push('ctrl'); if(ev.metaKey) parts.push(navigator.platform.includes('Mac')?'cmd':'meta'); if(ev.altKey) parts.push('alt'); if(ev.shiftKey) parts.push('shift'); const key=ev.key.toLowerCase(); if(!['control','shift','alt','meta'].includes(key)) parts.push(normalizeKey(key)); capturedSeq=parts.join('+'); display.textContent=capturedSeq; confirmBtn.disabled=!capturedSeq; });
+        function normalizeKey(k){ const map={arrowleft:'left',arrowright:'right',arrowup:'up',arrowdown:'down',' ':'space'}; return map[k]||k; }
+        window.addEventListener('message',e=>{ const m=e.data; if(m.type==='state'){ currentState=m.state; render(); }});
+        render(); vscode.postMessage({type:'requestState'});
+    </script>
+</body>
+</html>

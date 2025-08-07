@@ -1,9 +1,9 @@
 {
-  "name": "ultimate-ai",
-  "displayName": "Ultimate AI",
+  "name": "beast-mode",
+  "displayName": "Beast Mode",
   "description": "The ultimate VS Code configuration for AI coding",
   "version": "0.0.1",
-  "publisher": "ultimate-ai",
+  "publisher": "beast-mode",
   "engines": {
     "vscode": "^1.103.0"
   },
@@ -15,28 +15,28 @@
   "contributes": {
     "commands": [
       {
-        "command": "ultimate-ai.helloWorld",
+        "command": "beast-mode.helloWorld",
         "title": "Hello World"
       },
       {
-        "command": "ultimate-ai.toggleAutoApprove",
-        "title": "Ultimate AI: Toggle Auto Approve"
+        "command": "beast-mode.toggleAutoApprove",
+        "title": "Beast Mode: Toggle Auto Approve"
       },
       {
-        "command": "ultimate-ai.setMaxRequests",
-        "title": "Ultimate AI: Set Max Requests"
+        "command": "beast-mode.setMaxRequests",
+        "title": "Beast Mode: Set Max Requests"
       },
       {
-        "command": "ultimate-ai.refreshSettings",
-        "title": "Ultimate AI: Refresh Settings View"
+        "command": "beast-mode.refreshSettings",
+        "title": "Beast Mode: Refresh Settings View"
       }
     ],
   "viewsContainers": {
       "activitybar": [
         {
           "id": "ultimateAiContainer",
-          "title": "Ultimate AI",
-          "icon": "media/ultimate-ai.svg"
+          "title": "Beast Mode",
+          "icon": "media/beast-mode.svg"
         }
       ]
     },
@@ -46,7 +46,7 @@
           "type": "webview",
           "id": "ultimateAiSettings",
           "name": "Settings",
-          "icon": "media/ultimate-ai.svg"
+          "icon": "media/beast-mode.svg"
         }
       ]
     },

@@ -1,10 +1,10 @@
-# Ultimate AI (MVP)
+# Beast Mode (MVP)
 
 Opinionated AI-centric configuration surfaced via a simple Explorer view.
 
 ## Features
 
-Dedicated Activity Bar icon ("Ultimate AI") with a settings view listing core AI settings with quick toggle / edit:
+Dedicated Activity Bar icon ("Beast Mode") with a settings view listing core AI settings with quick toggle / edit:
 
 * Auto Approve (`chat.tools.autoApprove`) – boolean toggle.
 * Max Requests (`chat.agent.maxRequests`) – numeric input (integer ≥ 1).
@@ -15,13 +15,13 @@ Keybinding:
 
 Commands (via Command Palette):
 
-* `Ultimate AI: Toggle Auto Approve`
-* `Ultimate AI: Set Max Requests`
-* `Ultimate AI: Refresh Settings View`
+* `Beast Mode: Toggle Auto Approve`
+* `Beast Mode: Set Max Requests`
+* `Beast Mode: Refresh Settings View`
 
 ## Using the View
 
-1. Click the Ultimate AI activity bar icon.
+1. Click the Beast Mode activity bar icon.
 2. Open the "Settings" view.
 3. Click
 	* Auto Approve item to toggle true/false.
