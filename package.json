@@ -1,0 +1,79 @@
+{
+  "name": "ultimate-ai",
+  "displayName": "Ultimate AI",
+  "description": "The ultimate VS Code configuration for AI coding",
+  "version": "0.0.1",
+  "publisher": "ultimate-ai",
+  "engines": {
+    "vscode": "^1.103.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "ultimate-ai.helloWorld",
+        "title": "Hello World"
+      },
+      {
+        "command": "ultimate-ai.toggleAutoApprove",
+        "title": "Ultimate AI: Toggle Auto Approve"
+      },
+      {
+        "command": "ultimate-ai.setMaxRequests",
+        "title": "Ultimate AI: Set Max Requests"
+      },
+      {
+        "command": "ultimate-ai.refreshSettings",
+        "title": "Ultimate AI: Refresh Settings View"
+      }
+    ],
+  "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ultimateAiContainer",
+          "title": "Ultimate AI",
+          "icon": "media/ultimate-ai.svg"
+        }
+      ]
+    },
+    "views": {
+      "ultimateAiContainer": [
+        {
+          "id": "ultimateAiSettings",
+          "name": "Settings",
+          "icon": "media/ultimate-ai.svg"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "workbench.action.chat.openInEditor",
+        "key": "ctrl+alt+u",
+        "when": "editorTextFocus"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.102.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@typescript-eslint/eslint-plugin": "^8.39.0",
+    "@typescript-eslint/parser": "^8.39.0",
+    "eslint": "^9.32.0",
+    "typescript": "^5.9.2",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2"
+  }
+}
