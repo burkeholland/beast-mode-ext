@@ -34,15 +34,6 @@
   "githubPullRequests.pushBranch": "always",
   "chat.commandCenter.enabled": false,
   "window.commandCenter": false,
-  "chat.instructionsFilesLocations": {
-    ".github/instructions": true,
-    "/tmp/postman-collections-post-response.instructions.md": true,
-    "/tmp/postman-collections-pre-request.instructions.md": true,
-    "/tmp/postman-folder-post-response.instructions.md": true,
-    "/tmp/postman-folder-pre-request.instructions.md": true,
-    "/tmp/postman-http-request-post-response.instructions.md": true,
-    "/tmp/postman-http-request-pre-request.instructions.md": true
-  },
   "chat.todoListTool.enabled": true,
   "githubPullRequests.codingAgent.uiIntegration": true,
   "workbench.secondarySideBar.defaultVisibility": "hidden",

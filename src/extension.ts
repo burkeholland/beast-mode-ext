@@ -27,7 +27,7 @@ interface SettingsState {
 	keybindings: KeybindingEntry[];
 }
 
-class UltimateAiSettingsWebviewProvider implements vscode.WebviewViewProvider {
+class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'ultimateAiSettings';
 	private view?: vscode.WebviewView;
 
@@ -204,9 +204,9 @@ class UltimateAiSettingsWebviewProvider implements vscode.WebviewViewProvider {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	const provider = new UltimateAiSettingsWebviewProvider(context);
+	const provider = new BeastModeSettingsWebviewProvider(context);
 	context.subscriptions.push(
-		vscode.window.registerWebviewViewProvider(UltimateAiSettingsWebviewProvider.viewType, provider)
+		vscode.window.registerWebviewViewProvider(BeastModeSettingsWebviewProvider.viewType, provider)
 	);
 
 	context.subscriptions.push(
