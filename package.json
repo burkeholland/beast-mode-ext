@@ -43,6 +43,7 @@
     "views": {
       "ultimateAiContainer": [
         {
+          "type": "webview",
           "id": "ultimateAiSettings",
           "name": "Settings",
           "icon": "media/ultimate-ai.svg"
