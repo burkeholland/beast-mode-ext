@@ -83,19 +83,19 @@
     }
 
     .info {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 16px;
-      height: 16px;
-      border-radius: 50%;
-      font-size: 11px;
-      line-height: 16px;
-      color: var(--vscode-foreground);
-      background: var(--vscode-widget-shadow, rgba(127, 127, 127, .12));
-      border: 1px solid var(--vscode-widget-border, transparent);
-      opacity: .8;
-      cursor: default;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--vscode-foreground);
+  background: color-mix(in srgb, var(--vscode-input-background) 85%, transparent);
+  border: 1px solid var(--vscode-widget-border, transparent);
+  opacity: .9;
+  cursor: default;
     }
 
     .info:hover {
@@ -310,12 +310,52 @@
       border-radius: 6px;
       padding: 0 10px;
     }
+
+    /* Themed tooltip */
+    .tooltip {
+      position: fixed;
+      z-index: 9999;
+      background: var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
+      color: var(--vscode-editorHoverWidget-foreground, var(--vscode-foreground));
+      border: 1px solid var(--vscode-editorHoverWidget-border, var(--vscode-widget-border));
+      box-shadow: 0 6px 20px rgba(0, 0, 0, .28);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 12.5px;
+      line-height: 1.4;
+      max-width: 360px;
+      min-width: 140px;
+      pointer-events: none;
+      opacity: 0;
+      transform: translateY(-2px);
+      transition: opacity .12s ease, transform .12s ease;
+      white-space: pre-wrap;
+    }
+
+    .tooltip.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .tooltip::after {
+      content: '';
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      background: inherit;
+      border-left: inherit;
+      border-top: inherit;
+  left: var(--_arrow-left, 16px);
+  top: var(--_arrow-top, -4px);
+  transform: rotate(var(--_arrow-rotate, 45deg));
+    }
   </style>
 </head>
 
 <body>
   <h1>Beast Mode Configuration</h1>
   <div id="settingsContainer" role="region" aria-label="Settings"></div>
+
   <div class="section">
     <h2>Keybindings</h2>
     <div class="settings-list keybinding-list" id="keybindingsContainer" role="region" aria-label="Keybindings"></div>
@@ -371,6 +411,96 @@
       /** DOM roots */
       const settingsRoot = /** @type {HTMLElement} */($('#settingsContainer'));
       const keybindingsRoot = /** @type {HTMLElement} */($('#keybindingsContainer'));
+
+      /** Tooltip management */
+      let tooltipEl = /** @type {HTMLDivElement|null} */(null);
+      let hideTooltipTimer = /** @type {number|undefined} */(undefined);
+
+      const ensureTooltip = () => {
+        if (!tooltipEl) {
+          tooltipEl = document.createElement('div');
+          tooltipEl.className = 'tooltip';
+          tooltipEl.setAttribute('role', 'tooltip');
+          document.body.appendChild(tooltipEl);
+        }
+        return tooltipEl;
+      };
+
+      /**
+       * @param {HTMLElement} target
+       * @param {string} text
+       */
+      const showTooltip = (target, text) => {
+        const tip = ensureTooltip();
+        window.clearTimeout(hideTooltipTimer);
+        tip.textContent = text;
+        tip.classList.add('visible');
+
+        // Position near target (prefer above)
+        const rect = target.getBoundingClientRect();
+        // First set offscreen to measure
+        tip.style.left = '-9999px';
+        tip.style.top = '-9999px';
+        tip.style.maxWidth = '360px';
+
+        // Force layout
+        const { offsetWidth: w, offsetHeight: h } = tip;
+        const margin = 8;
+        const viewportW = window.innerWidth;
+        const viewportH = window.innerHeight;
+
+        let top = rect.top - h - 10; // above with arrow
+        let left = rect.left + rect.width / 2 - w / 2;
+        let arrowAt = 'bottom';
+
+        if (top < margin) {
+          // Place below
+          top = rect.bottom + 10;
+          arrowAt = 'top';
+        }
+
+        // Clamp horizontally
+        left = Math.max(margin, Math.min(left, viewportW - w - margin));
+
+        tip.style.top = `${Math.round(top)}px`;
+        tip.style.left = `${Math.round(left)}px`;
+
+        // Arrow positioning
+        const arrowSize = 8;
+        const arrowLeft = rect.left + rect.width / 2 - arrowSize / 2 - left;
+        tip.style.setProperty('--_arrow-left', `${Math.max(12, Math.min(w - 12 - arrowSize, arrowLeft))}px`);
+        tip.style.setProperty('--_arrow-size', `${arrowSize}px`);
+        if (arrowAt === 'bottom') {
+          tip.style.setProperty('--_arrow-top', `${h - arrowSize / 2 - 1}px`);
+          tip.style.setProperty('--_arrow-rotate', '45deg');
+        } else {
+          tip.style.setProperty('--_arrow-top', `${-arrowSize / 2 + 1}px`);
+          tip.style.setProperty('--_arrow-rotate', '225deg');
+        }
+        tip.style.setProperty('--_arrow-border', getComputedStyle(tip).borderColor);
+
+        // Apply arrow
+        tip.style.setProperty('clip-path', ''); // no-op to ensure style recalculation
+        tip.style.position = 'fixed';
+        tip.style.pointerEvents = 'none';
+        tip.style.setProperty('--_arrow-bg', getComputedStyle(tip).backgroundColor);
+        tip.style.setProperty('--_arrow-shadow', 'rgba(0,0,0,.18)');
+        tip.style.setProperty('--_arrow-left', tip.style.getPropertyValue('--_arrow-left'));
+        tip.style.setProperty('--_arrow-top', tip.style.getPropertyValue('--_arrow-top'));
+        tip.style.setProperty('--_arrow-size', tip.style.getPropertyValue('--_arrow-size'));
+
+        // Manually position ::after arrow via inline styles (CSS uses variables)
+        tip.style.setProperty('--_arrow-display', 'block');
+        tip.style.setProperty('--_arrow-rotate', tip.style.getPropertyValue('--_arrow-rotate'));
+      };
+
+      const hideTooltip = (delay = 120) => {
+        const tip = ensureTooltip();
+        window.clearTimeout(hideTooltipTimer);
+        hideTooltipTimer = window.setTimeout(() => {
+          tip.classList.remove('visible');
+        }, delay);
+      };
 
       /** Compute common missing extension IDs across defs in a group */
       const computeCommonMissing = (defs) => {
@@ -486,7 +616,20 @@
         const label = el('label', { id: labelId, htmlFor: idFromKey(def.key) }, def.title || def.key.split('.').slice(-1)[0]);
         const heading = el('div', { className: 'heading' }, [label]);
         if (def.info) {
-          heading.appendChild(el('span', { className: 'info', title: def.info, 'aria-label': def.info }, 'i'));
+          const infoEl = el('span', { className: 'info', tabindex: 0, 'aria-label': 'More info', 'data-info': def.info }, 'i');
+          // Mouse and keyboard interactions
+          infoEl.addEventListener('mouseenter', () => showTooltip(infoEl, def.info));
+          infoEl.addEventListener('mouseleave', () => hideTooltip());
+          infoEl.addEventListener('focus', () => showTooltip(infoEl, def.info));
+          infoEl.addEventListener('blur', () => hideTooltip(0));
+          infoEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') hideTooltip(0);
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              showTooltip(infoEl, def.info);
+            }
+          });
+          heading.appendChild(infoEl);
         }
         main.appendChild(heading);
         main.appendChild(el('div', { className: 'desc' }, def.description));
@@ -546,6 +689,11 @@
 
       // Initial render
       render();
+
+  // Global listeners to prevent lingering tooltips
+  window.addEventListener('scroll', () => hideTooltip(0), true);
+  window.addEventListener('resize', () => hideTooltip(0));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideTooltip(0); });
     })();
   </script>
 </body>

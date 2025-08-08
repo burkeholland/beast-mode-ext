@@ -1,7 +1,7 @@
 {
   "settings": [
     {
-      "group": "Chat Tweaks",
+      "group": "Copilot",
       "settings": [
         {
           "key": "chat.tools.autoApprove",
@@ -41,6 +41,50 @@
             }
           ],
           "info": "Chat is frequently used in the sidebar where vertical space is constrained. Turning on wrapping makes it so that you don't have to scroll code blocks to read them."
+        },
+        {
+          "key": "chat.agentSessionsViewLocation",
+          "title": "Agent Sessions Menu",
+          "description": "Specify the location for the agent sessions menu.",
+          "type": "string",
+          "options": [
+            {
+              "value": "disabled",
+              "label": "disabled"
+            },
+            {
+              "value": "showChatsMenu",
+              "label": "showChatsMenu"
+            },
+            {
+              "value": "view",
+              "label": "view"
+            }
+          ]
+        },
+        {
+          "key": "workbench.secondarySideBar.defaultVisibility",
+          "title": "Secondary Sidebar Visibility",
+          "description": "Default visibility of the Secondary Side Bar.",
+          "type": "string",
+          "options": [
+            {
+              "value": "visible",
+              "label": "Visible"
+            },
+            {
+              "value": "hidden",
+              "label": "Hidden"
+            }
+          ],
+          "info": "By default the secondary sidebar opens automatically on new projects. Setting it to \"hidden\" will keep it closed until you manually open it."
+        },
+        {
+          "key": "editor.aiStats.enabled",
+          "title": "AI Stats",
+          "description": "Enable AI statistics in the Copilot menu.",
+          "type": "boolean",
+          "info": "View the ammount of manual code vs typing over time. Appears as a progress bar in the bottom status bar area."
         }
       ]
     },
@@ -49,10 +93,10 @@
       "settings": [
         {
           "key": "githubPullRequests.codingAgent.enabled",
-          "title": "Async Coding Agent",
-          "description": "Enable the async GitHub Copilot Coding Agent.",
+          "title": "Coding Agent Tool",
+          "description": "Enable the GitHub Copilot Coding Agent tool in chat.",
           "type": "boolean",
-          "info": "Enables integration with the async GitHub Copilot Coding Agent."
+          "info": "GitHub Copilot Coding agent can be referenced from chat with #copilotCodingAgent"
         },
         {
           "key": "githubPullRequests.codingAgent.uiIntegration",
@@ -71,68 +115,9 @@
           "title": "Agent Auto Commit/Push",
           "description": "Allow coding agent to automatically commit & push.",
           "type": "boolean"
-        },
-        {
-          "key": "chat.agentSessionsViewLocation",
-          "title": "Controls where to show the agent sessions menu.",
-          "description": "Specify the location for the agent sessions menu.",
-          "type": "string",
-          "options": [
-            {
-              "value": "disabled",
-              "label": "disabled"
-            },
-            {
-              "value": "showChatsMenu",
-              "label": "showChatsMenu"
-            },
-            {
-              "value": "view",
-              "label": "view"
-            }
-          ]
         }
       ],
       "requiresExtension": "GitHub.vscode-pull-request-github"
-    },
-    {
-      "group": "Workbench",
-      "settings": [
-        {
-          "key": "workbench.secondarySideBar.defaultVisibility",
-          "title": "Secondary Sidebar Visibility",
-          "description": "Default visibility of the Secondary Side Bar.",
-          "type": "string",
-          "options": [
-            {
-              "value": "visible",
-              "label": "Visible"
-            },
-            {
-              "value": "hidden",
-              "label": "Hidden"
-            }
-          ]
-        },
-        {
-          "key": "editor.aiStats.enabled",
-          "title": "AI Stats",
-          "description": "Enable AI statistics in the Copilot menu.",
-          "type": "boolean",
-          "info": "View the ammount of manual code vs typing over time. Appears as a progress bar in the bottom status bar area."
-        }
-      ]
-    },
-    {
-      "group": "Terminal",
-      "settings": [
-        {
-          "key": "terminal.integrated.suggest.quickSuggestions",
-          "title": "Terminal Quick Suggestions",
-          "description": "Quick suggestion enablement per terminal context.",
-          "type": "json"
-        }
-      ]
     }
   ],
   "keybindings": [
