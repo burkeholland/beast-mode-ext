@@ -17,6 +17,8 @@ interface SettingDefinition {
     requires?: string[];
     // Computed at render time: which required extensions are currently missing
     missingExtensions?: string[];
+    // Optional: extra info shown on hover in the UI
+    info?: string;
 }
 
 interface KeybindingEntry {
@@ -76,6 +78,10 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
                                     s.step,
                                     this.mergeRequires(groupRequires, this.normalizeRequires(s.requiresExtension || s.requiresExtensions || s.requires))
                                 );
+                                // Attach optional info if provided
+                                if (typeof s.info === 'string') {
+                                    (enriched as any).info = s.info;
+                                }
                                 defs.push(enriched);
                             }
                             continue;
@@ -94,6 +100,9 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
                                 entry.step,
                                 this.normalizeRequires(entry.requiresExtension || entry.requiresExtensions || entry.requires)
                             );
+                            if (typeof (entry as any).info === 'string') {
+                                (enriched as any).info = (entry as any).info;
+                            }
                             defs.push(enriched);
                         }
                     }
