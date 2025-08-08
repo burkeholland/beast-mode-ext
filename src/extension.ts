@@ -37,47 +37,7 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
-	private settingDefinitions: SettingDefinition[] = [
-		// Chat / Agent related
-		{ key: 'chat.tools.autoApprove', type: 'boolean', description: 'Automatically approve tool results without prompting.', group: 'Chat Agent' },
-		{ key: 'chat.agent.maxRequests', type: 'number', description: 'Maximum concurrent agent requests.', group: 'Chat Agent', min: 1, step: 1 },
-		{ key: 'chat.commandCenter.enabled', type: 'boolean', description: 'Enable the Chat Command Center UI.', group: 'Chat' },
-		{ key: 'chat.todoListTool.enabled', type: 'boolean', description: 'Enable the experimental TODO list chat tool.', group: 'Chat' },
-		{ key: 'chat.editor.wordWrap', type: 'string', description: 'Controls word wrap in chat editors.', group: 'Chat' },
-
-		// GitHub Copilot
-		{ key: 'github.copilot.chat.agent.enabled', type: 'boolean', description: 'Enable the Copilot Chat agent.', group: 'GitHub Copilot' },
-		{ key: 'github.copilot.nextEditSuggestions.enabled', type: 'boolean', description: 'Enable Copilot next edit suggestions.', group: 'GitHub Copilot' },
-		{ key: 'github.copilot.chat.commitMessageGeneration.instructions', type: 'json', description: 'JSON instructions influencing generated commit messages.', group: 'GitHub Copilot' },
-
-		// GitHub Pull Requests / Coding Agent
-		{ key: 'githubPullRequests.codingAgent.enabled', type: 'boolean', description: 'Enable the GitHub PR Coding Agent.', group: 'GitHub PRs' },
-		{ key: 'githubPullRequests.experimental.chat', type: 'boolean', description: 'Enable experimental chat in GitHub PRs.', group: 'GitHub PRs' },
-		{ key: 'githubPullRequests.codingAgent.autoCommitAndPush', type: 'boolean', description: 'Allow coding agent to automatically commit & push.', group: 'GitHub PRs' },
-		{ key: 'githubPullRequests.codingAgent.uiIntegration', type: 'boolean', description: 'Show coding agent UI integration elements.', group: 'GitHub PRs' },
-		{ key: 'githubPullRequests.pushBranch', type: 'string', description: 'When to push the current branch (e.g. always / never / prompt).', group: 'GitHub PRs' },
-
-		// Workbench / Appearance
-		{ key: 'workbench.sideBar.location', type: 'string', description: 'Location of the primary sidebar (left or right).', group: 'Workbench' },
-		{ key: 'workbench.activityBar.location', type: 'string', description: 'Location of the Activity Bar (default or top).', group: 'Workbench' },
-		{ key: 'workbench.secondarySideBar.defaultVisibility', type: 'string', description: 'Default visibility of the Secondary Side Bar.', group: 'Workbench' },
-		{ key: 'workbench.colorTheme', type: 'string', description: 'Current color theme.', group: 'Appearance' },
-		{ key: 'workbench.iconTheme', type: 'string', description: 'File icon theme for files & folders.', group: 'Appearance' },
-		{ key: 'workbench.productIconTheme', type: 'string', description: 'Product icon theme for UI icons.', group: 'Appearance' },
-
-		// Editor / Terminal
-		{ key: 'editor.minimap.enabled', type: 'boolean', description: 'Controls whether the minimap is shown.', group: 'Editor' },
-		{ key: 'terminal.integrated.tabs.location', type: 'string', description: 'Location of the terminal tabs (left|right).', group: 'Terminal' },
-		{ key: 'terminal.integrated.fontFamily', type: 'string', description: 'Font family for the integrated terminal.', group: 'Terminal' },
-		{ key: 'terminal.integrated.suggest.quickSuggestions', type: 'json', description: 'Quick suggestion enablement per terminal context.', group: 'Terminal' },
-
-		// Git
-		{ key: 'git.confirmSync', type: 'boolean', description: 'Confirm sync operations before running.', group: 'Git' },
-		{ key: 'git.autofetch', type: 'boolean', description: 'Automatically fetch from remotes.', group: 'Git' },
-
-		// Window
-		{ key: 'window.commandCenter', type: 'boolean', description: 'Enable the Command Center in the title bar.', group: 'Window' },
-	];
+	private settingDefinitions: SettingDefinition[] = [];
 
 	private configKeybindings: { command: string; title?: string; default?: string; when?: string }[] = [];
 
@@ -98,7 +58,12 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 							entry.key,
 							entry.title,
 							entry.description,
-							entry.group
+							entry.group,
+							entry.type,
+							entry.options,
+							entry.min,
+							entry.max,
+							entry.step
 						);
 						defs.push(enriched);
 					}
@@ -115,7 +80,17 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 		}
 	}
 
-	private inferDefinitionFromSchema(key: string, title?: string, description?: string, groupOverride?: string): SettingDefinition {
+	private inferDefinitionFromSchema(
+		key: string,
+		title?: string,
+		description?: string,
+		groupOverride?: string,
+		typeOverride?: SettingDefinition['type'],
+		optionsOverride?: Array<{ value: string; label?: string }>,
+		minOverride?: number,
+		maxOverride?: number,
+		stepOverride?: number
+	): SettingDefinition {
 		const schema = this.findConfigSchemaForKey(key);
 		const group = groupOverride || this.deriveGroupFromKey(key);
 	const label = title || key.split('.').slice(-1)[0];
@@ -177,6 +152,18 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			} catch { /* ignore */ }
 		}
+
+		// Apply explicit overrides from config.json (highest precedence)
+		if (typeOverride) {
+			type = typeOverride;
+		}
+		if (optionsOverride && optionsOverride.length) {
+			options = optionsOverride.map(o => ({ value: String(o.value), label: o.label }));
+		}
+		if (minOverride !== undefined) { min = minOverride; }
+		if (maxOverride !== undefined) { max = maxOverride; }
+		if (stepOverride !== undefined) { step = stepOverride; }
+		// No internal fallbacks: enums/options should come from config.json or schema only
 		return {
 			key,
 			type,

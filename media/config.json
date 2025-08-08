@@ -1,37 +1,37 @@
 {
   "settings": [
-    { "key": "chat.tools.autoApprove", "title": "Auto Approve Tools", "description": "Automatically approve tool results without prompting." },
-    { "key": "chat.agent.maxRequests", "title": "Max Agent Requests", "description": "Maximum concurrent agent requests." },
-    { "key": "chat.commandCenter.enabled", "title": "Chat Command Center", "description": "Enable the Chat Command Center UI." },
-    { "key": "chat.todoListTool.enabled", "title": "TODO List Tool", "description": "Enable the experimental TODO list chat tool." },
-    { "key": "chat.editor.wordWrap", "title": "Chat Editor Wrap", "description": "Controls word wrap in chat editors." },
+  { "key": "chat.tools.autoApprove", "title": "Auto Approve Tools", "description": "Automatically approve tool results without prompting.", "type": "boolean" },
+  { "key": "chat.agent.maxRequests", "title": "Max Agent Requests", "description": "Maximum concurrent agent requests.", "type": "number", "min": 1, "step": 1 },
+  { "key": "chat.commandCenter.enabled", "title": "Chat Command Center", "description": "Enable the Chat Command Center UI.", "type": "boolean" },
+  { "key": "chat.todoListTool.enabled", "title": "TODO List Tool", "description": "Enable the experimental TODO list chat tool.", "type": "boolean" },
+  { "key": "chat.editor.wordWrap", "title": "Chat Editor Wrap", "description": "Controls word wrap in chat editors.", "type": "string", "options": [ { "value": "off", "label": "Off" }, { "value": "on", "label": "On" } ] },
 
-    { "key": "github.copilot.chat.agent.enabled", "title": "Copilot Chat Agent", "description": "Enable the Copilot Chat agent." },
-    { "key": "github.copilot.nextEditSuggestions.enabled", "title": "Next Edit Suggestions", "description": "Enable Copilot next edit suggestions." },
-    { "key": "github.copilot.chat.commitMessageGeneration.instructions", "title": "Commit Message Instructions", "description": "JSON instructions influencing generated commit messages." },
+  { "key": "github.copilot.chat.agent.enabled", "title": "Copilot Chat Agent", "description": "Enable the Copilot Chat agent.", "type": "boolean" },
+  { "key": "github.copilot.nextEditSuggestions.enabled", "title": "Next Edit Suggestions", "description": "Enable Copilot next edit suggestions.", "type": "boolean" },
+  { "key": "github.copilot.chat.commitMessageGeneration.instructions", "title": "Commit Message Instructions", "description": "JSON instructions influencing generated commit messages.", "type": "json" },
 
-    { "key": "githubPullRequests.codingAgent.enabled", "title": "PR Coding Agent", "description": "Enable the GitHub PR Coding Agent." },
-    { "key": "githubPullRequests.experimental.chat", "title": "PR Chat (Experimental)", "description": "Enable experimental chat in GitHub PRs." },
-    { "key": "githubPullRequests.codingAgent.autoCommitAndPush", "title": "Agent Auto Commit/Push", "description": "Allow coding agent to automatically commit & push." },
-    { "key": "githubPullRequests.codingAgent.uiIntegration", "title": "Agent UI Integration", "description": "Show coding agent UI integration elements." },
-    { "key": "githubPullRequests.pushBranch", "title": "Push Branch Strategy", "description": "When to push the current branch (e.g. always / never / prompt)." },
+  { "key": "githubPullRequests.codingAgent.enabled", "title": "PR Coding Agent", "description": "Enable the GitHub PR Coding Agent.", "type": "boolean" },
+  { "key": "githubPullRequests.experimental.chat", "title": "PR Chat (Experimental)", "description": "Enable experimental chat in GitHub PRs.", "type": "boolean" },
+  { "key": "githubPullRequests.codingAgent.autoCommitAndPush", "title": "Agent Auto Commit/Push", "description": "Allow coding agent to automatically commit & push.", "type": "boolean" },
+  { "key": "githubPullRequests.codingAgent.uiIntegration", "title": "Agent UI Integration", "description": "Show coding agent UI integration elements.", "type": "boolean" },
+  { "key": "githubPullRequests.pushBranch", "title": "Push Branch Strategy", "description": "When to push the current branch.", "type": "string", "options": [ { "value": "always", "label": "Always" }, { "value": "prompt", "label": "Prompt" }, { "value": "never", "label": "Never" } ] },
 
-    { "key": "workbench.sideBar.location", "title": "Sidebar Location", "description": "Location of the primary sidebar (left or right)." },
-    { "key": "workbench.activityBar.location", "title": "Activity Bar Location", "description": "Location of the Activity Bar (default or top)." },
-    { "key": "workbench.secondarySideBar.defaultVisibility", "title": "Secondary Sidebar Visibility", "description": "Default visibility of the Secondary Side Bar." },
-    { "key": "workbench.colorTheme", "title": "Color Theme", "description": "Current color theme." },
-    { "key": "workbench.iconTheme", "title": "Icon Theme", "description": "File icon theme for files & folders." },
-    { "key": "workbench.productIconTheme", "title": "Product Icon Theme", "description": "Product icon theme for UI icons." },
+  { "key": "workbench.sideBar.location", "title": "Sidebar Location", "description": "Location of the primary sidebar.", "type": "string", "options": [ { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" } ] },
+  { "key": "workbench.activityBar.location", "title": "Activity Bar Location", "description": "Location of the Activity Bar.", "type": "string", "options": [ { "value": "default", "label": "Default" }, { "value": "top", "label": "Top" } ] },
+  { "key": "workbench.secondarySideBar.defaultVisibility", "title": "Secondary Sidebar Visibility", "description": "Default visibility of the Secondary Side Bar.", "type": "string", "options": [ { "value": "visible", "label": "Visible" }, { "value": "hidden", "label": "Hidden" } ] },
+  { "key": "workbench.colorTheme", "title": "Color Theme", "description": "Current color theme.", "type": "string" },
+  { "key": "workbench.iconTheme", "title": "Icon Theme", "description": "File icon theme for files & folders.", "type": "string" },
+  { "key": "workbench.productIconTheme", "title": "Product Icon Theme", "description": "Product icon theme for UI icons.", "type": "string" },
 
-    { "key": "editor.minimap.enabled", "title": "Minimap", "description": "Controls whether the minimap is shown." },
-    { "key": "terminal.integrated.tabs.location", "title": "Terminal Tabs Location", "description": "Location of the terminal tabs (left|right)." },
-    { "key": "terminal.integrated.fontFamily", "title": "Terminal Font Family", "description": "Font family for the integrated terminal." },
-    { "key": "terminal.integrated.suggest.quickSuggestions", "title": "Terminal Quick Suggestions", "description": "Quick suggestion enablement per terminal context." },
+  { "key": "editor.minimap.enabled", "title": "Minimap", "description": "Controls whether the minimap is shown.", "type": "boolean" },
+  { "key": "terminal.integrated.tabs.location", "title": "Terminal Tabs Location", "description": "Location of the terminal tabs.", "type": "string", "options": [ { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" } ] },
+  { "key": "terminal.integrated.fontFamily", "title": "Terminal Font Family", "description": "Font family for the integrated terminal.", "type": "string" },
+  { "key": "terminal.integrated.suggest.quickSuggestions", "title": "Terminal Quick Suggestions", "description": "Quick suggestion enablement per terminal context.", "type": "json" },
 
-    { "key": "git.confirmSync", "title": "Confirm Sync", "description": "Confirm sync operations before running." },
-    { "key": "git.autofetch", "title": "Auto Fetch", "description": "Automatically fetch from remotes." },
+  { "key": "git.confirmSync", "title": "Confirm Sync", "description": "Confirm sync operations before running.", "type": "boolean" },
+  { "key": "git.autofetch", "title": "Auto Fetch", "description": "Automatically fetch from remotes.", "type": "boolean" },
 
-    { "key": "window.commandCenter", "title": "Command Center", "description": "Enable the Command Center in the title bar." }
+  { "key": "window.commandCenter", "title": "Command Center", "description": "Enable the Command Center in the title bar.", "type": "boolean" }
   ],
   "keybindings": [
     { "command": "workbench.action.chat.openInEditor", "title": "Open Chat in Editor", "default": "ctrl+alt+u", "when": "editorTextFocus" },
