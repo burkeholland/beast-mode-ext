@@ -4,12 +4,15 @@ import * as path from 'path';
 
 interface SettingDefinition {
 	key: string;
-	type: 'boolean' | 'number' | 'string';
+	type: 'boolean' | 'number' | 'string' | 'json';
+	title?: string;
 	description: string;
 	group: string;
 	min?: number;
 	max?: number;
 	step?: number;
+	// For string enums, provide available options
+	options?: Array<{ value: string; label?: string }>;
 }
 
 interface KeybindingEntry {
@@ -33,14 +36,187 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
-	private readonly settingDefinitions: SettingDefinition[] = [
+	private settingDefinitions: SettingDefinition[] = [
+		// Chat / Agent related
 		{ key: 'chat.tools.autoApprove', type: 'boolean', description: 'Automatically approve tool results without prompting.', group: 'Chat Agent' },
 		{ key: 'chat.agent.maxRequests', type: 'number', description: 'Maximum concurrent agent requests.', group: 'Chat Agent', min: 1, step: 1 },
+		{ key: 'chat.commandCenter.enabled', type: 'boolean', description: 'Enable the Chat Command Center UI.', group: 'Chat' },
+		{ key: 'chat.todoListTool.enabled', type: 'boolean', description: 'Enable the experimental TODO list chat tool.', group: 'Chat' },
+		{ key: 'chat.editor.wordWrap', type: 'string', description: 'Controls word wrap in chat editors.', group: 'Chat' },
+
+		// GitHub Copilot
+		{ key: 'github.copilot.chat.agent.enabled', type: 'boolean', description: 'Enable the Copilot Chat agent.', group: 'GitHub Copilot' },
+		{ key: 'github.copilot.nextEditSuggestions.enabled', type: 'boolean', description: 'Enable Copilot next edit suggestions.', group: 'GitHub Copilot' },
+		{ key: 'github.copilot.chat.commitMessageGeneration.instructions', type: 'json', description: 'JSON instructions influencing generated commit messages.', group: 'GitHub Copilot' },
+
+		// GitHub Pull Requests / Coding Agent
+		{ key: 'githubPullRequests.codingAgent.enabled', type: 'boolean', description: 'Enable the GitHub PR Coding Agent.', group: 'GitHub PRs' },
+		{ key: 'githubPullRequests.experimental.chat', type: 'boolean', description: 'Enable experimental chat in GitHub PRs.', group: 'GitHub PRs' },
+		{ key: 'githubPullRequests.codingAgent.autoCommitAndPush', type: 'boolean', description: 'Allow coding agent to automatically commit & push.', group: 'GitHub PRs' },
+		{ key: 'githubPullRequests.codingAgent.uiIntegration', type: 'boolean', description: 'Show coding agent UI integration elements.', group: 'GitHub PRs' },
+		{ key: 'githubPullRequests.pushBranch', type: 'string', description: 'When to push the current branch (e.g. always / never / prompt).', group: 'GitHub PRs' },
+
+		// Workbench / Appearance
 		{ key: 'workbench.sideBar.location', type: 'string', description: 'Location of the primary sidebar (left or right).', group: 'Workbench' },
+		{ key: 'workbench.activityBar.location', type: 'string', description: 'Location of the Activity Bar (default or top).', group: 'Workbench' },
+		{ key: 'workbench.secondarySideBar.defaultVisibility', type: 'string', description: 'Default visibility of the Secondary Side Bar.', group: 'Workbench' },
 		{ key: 'workbench.colorTheme', type: 'string', description: 'Current color theme.', group: 'Appearance' },
+		{ key: 'workbench.iconTheme', type: 'string', description: 'File icon theme for files & folders.', group: 'Appearance' },
+		{ key: 'workbench.productIconTheme', type: 'string', description: 'Product icon theme for UI icons.', group: 'Appearance' },
+
+		// Editor / Terminal
 		{ key: 'editor.minimap.enabled', type: 'boolean', description: 'Controls whether the minimap is shown.', group: 'Editor' },
 		{ key: 'terminal.integrated.tabs.location', type: 'string', description: 'Location of the terminal tabs (left|right).', group: 'Terminal' },
+		{ key: 'terminal.integrated.fontFamily', type: 'string', description: 'Font family for the integrated terminal.', group: 'Terminal' },
+		{ key: 'terminal.integrated.suggest.quickSuggestions', type: 'json', description: 'Quick suggestion enablement per terminal context.', group: 'Terminal' },
+
+		// Git
+		{ key: 'git.confirmSync', type: 'boolean', description: 'Confirm sync operations before running.', group: 'Git' },
+		{ key: 'git.autofetch', type: 'boolean', description: 'Automatically fetch from remotes.', group: 'Git' },
+
+		// Window
+		{ key: 'window.commandCenter', type: 'boolean', description: 'Enable the Command Center in the title bar.', group: 'Window' },
 	];
+
+	private configKeybindings: { command: string; title?: string; default?: string; when?: string }[] = [];
+
+	private ensureLoadedFromConfig() {
+		try {
+			const cfgPath = path.join(this.context.extensionPath, 'media', 'config.json');
+			if (fs.existsSync(cfgPath)) {
+				const raw = fs.readFileSync(cfgPath, 'utf8');
+				const json = JSON.parse(raw);
+				if (Array.isArray(json?.settings)) {
+					// json.settings can be minimal entries: { key, title?, description?, group? }
+					const defs: SettingDefinition[] = [];
+					for (const entry of json.settings) {
+						if (!entry?.key || typeof entry.key !== 'string') {
+							continue;
+						}
+						const enriched = this.inferDefinitionFromSchema(
+							entry.key,
+							entry.title,
+							entry.description,
+							entry.group
+						);
+						defs.push(enriched);
+					}
+					if (defs.length) {
+						this.settingDefinitions = defs;
+					}
+				}
+				if (Array.isArray(json?.keybindings)) {
+					this.configKeybindings = json.keybindings as any[];
+				}
+			}
+		} catch {
+			// ignore and keep defaults
+		}
+	}
+
+	private inferDefinitionFromSchema(key: string, title?: string, description?: string, groupOverride?: string): SettingDefinition {
+		const schema = this.findConfigSchemaForKey(key);
+		const group = groupOverride || this.deriveGroupFromKey(key);
+	const label = title || key.split('.').slice(-1)[0];
+		let type: SettingDefinition['type'] = 'string';
+		let options: Array<{ value: string; label?: string }> | undefined;
+		let min: number | undefined;
+		let max: number | undefined;
+		let step: number | undefined;
+		if (schema) {
+			const sType = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+			if (sType === 'boolean') {
+				type = 'boolean';
+			} else if (sType === 'number' || sType === 'integer') {
+				type = 'number';
+				step = sType === 'integer' ? 1 : undefined;
+			} else if (sType === 'object' || sType === 'array') {
+				type = 'json';
+			} else {
+				type = 'string';
+			}
+			if (schema.enum && Array.isArray(schema.enum)) {
+				options = schema.enum.map((v: any, i: number) => ({ value: String(v), label: Array.isArray(schema.enumDescriptions) ? schema.enumDescriptions[i] : undefined }));
+			} else if (schema.oneOf || schema.anyOf) {
+				const alts = (schema.oneOf || schema.anyOf) as any[];
+				const enums = alts
+					.filter(e => e?.const !== undefined || e?.enum)
+					.map(e => e.const ?? (Array.isArray(e.enum) ? e.enum[0] : undefined))
+					.filter((v: any) => v !== undefined);
+				if (enums && enums.length) {
+					options = enums.map((v: any) => ({ value: String(v) }));
+				}
+			}
+			if (typeof schema.minimum === 'number') {
+				min = schema.minimum;
+			}
+			if (typeof schema.maximum === 'number') {
+				max = schema.maximum;
+			}
+		}
+		// Fallback: infer type from current/default value via configuration.inspect()
+		if (!schema || !type || type === 'string') {
+			try {
+				const info = this.getConfiguration().inspect<any>(key);
+				const sample = info?.globalValue ?? info?.workspaceValue ?? info?.workspaceFolderValue ?? info?.defaultValue;
+				if (sample !== undefined) {
+					const t = typeof sample;
+					if (t === 'boolean') {
+						type = 'boolean';
+					} else if (t === 'number') {
+						type = 'number';
+						if (Number.isInteger(sample) && step === undefined) {
+							step = 1;
+						}
+					} else if (t === 'object' && sample !== null) {
+						type = 'json';
+					} else {
+						type = 'string';
+					}
+				}
+			} catch { /* ignore */ }
+		}
+		return {
+			key,
+			type,
+			title: label,
+			description: description || label,
+			group,
+			min, max, step,
+			options
+		};
+	}
+
+	private findConfigSchemaForKey(key: string): any | undefined {
+		for (const ext of vscode.extensions.all) {
+			const contrib = (ext.packageJSON?.contributes as any) || {};
+			const config = contrib.configuration;
+			if (!config) {
+				continue;
+			}
+			const buckets = Array.isArray(config) ? config : [config];
+			for (const bucket of buckets) {
+				const props = bucket?.properties;
+				if (props && Object.prototype.hasOwnProperty.call(props, key)) {
+					return props[key];
+				}
+			}
+		}
+		return undefined;
+	}
+
+	private deriveGroupFromKey(key: string): string {
+		const first = key.split('.')[0];
+	if (first === 'github') { return 'GitHub Copilot'; }
+	if (first === 'githubPullRequests') { return 'GitHub PRs'; }
+	if (first === 'terminal') { return 'Terminal'; }
+	if (first === 'workbench') { return 'Workbench'; }
+	if (first === 'editor') { return 'Editor'; }
+	if (first === 'chat') { return 'Chat'; }
+	if (first === 'git') { return 'Git'; }
+	if (first === 'window') { return 'Window'; }
+		return first.charAt(0).toUpperCase() + first.slice(1);
+	}
 
 	resolveWebviewView(webviewView: vscode.WebviewView): void | Thenable<void> {
 		this.view = webviewView;
@@ -49,6 +225,7 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 			localResourceRoots: [vscode.Uri.file(path.join(this.context.extensionPath, 'media'))]
 		};
 		webviewView.webview.onDidReceiveMessage(msg => this.handleMessage(msg));
+	this.ensureLoadedFromConfig();
 		this.postState();
 	}
 
@@ -96,6 +273,17 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 		const contrib = vscode.extensions.getExtension(this.context.extension.id)?.packageJSON?.contributes;
 		const declared: any[] = contrib?.keybindings || [];
 		const commands: any[] = contrib?.commands || [];
+		const mergedList: any[] = [];
+		// Start with config-provided entries (if any)
+		for (const kb of this.configKeybindings) {
+			mergedList.push({ command: kb.command, key: kb.default, when: kb.when });
+		}
+		// Then add any declared keybindings not already present
+		for (const kb of declared) {
+			if (!mergedList.find(m => m.command === kb.command)) {
+				mergedList.push(kb);
+			}
+		}
 		// Attempt to read user keybindings.json to get overrides
 		let overrides: Record<string, string> = {};
 		const userKbPath = this.getUserKeybindingsPath();
@@ -113,11 +301,12 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 				}
 			} catch { /* ignore */ }
 		}
-		return declared.map(kb => {
+		return mergedList.map(kb => {
 			const cmdMeta = commands.find(c => c.command === kb.command);
+			const cfgMeta = this.configKeybindings.find(c => c.command === kb.command);
 			return {
 				command: kb.command,
-				title: cmdMeta?.title || kb.command,
+				title: cfgMeta?.title || cmdMeta?.title || kb.command,
 				default: kb.key,
 				when: kb.when,
 				current: overrides[kb.command] || kb.key

@@ -16,17 +16,20 @@ suite('Extension Test Suite', () => {
 	test('Can update autoApprove setting', async () => {
 		const config = vscode.workspace.getConfiguration();
 		await config.update('chat.tools.autoApprove', true, vscode.ConfigurationTarget.Global);
-		const val = config.get<boolean>('chat.tools.autoApprove');
-		assert.strictEqual(val, true);
+		const autoApprove = config.inspect<boolean>('chat.tools.autoApprove');
+		assert.strictEqual(autoApprove?.globalValue, true);
 		await config.update('chat.tools.autoApprove', false, vscode.ConfigurationTarget.Global);
-		assert.strictEqual(config.get<boolean>('chat.tools.autoApprove'), false);
+		const autoApprove2 = config.inspect<boolean>('chat.tools.autoApprove');
+		assert.strictEqual(autoApprove2?.globalValue, false);
 	});
 
 	test('Max requests numeric validation', async () => {
 		const config = vscode.workspace.getConfiguration();
 		await config.update('chat.agent.maxRequests', 7, vscode.ConfigurationTarget.Global);
-		assert.strictEqual(config.get<number>('chat.agent.maxRequests'), 7);
+		const mr = config.inspect<number>('chat.agent.maxRequests');
+		assert.strictEqual(mr?.globalValue, 7);
 		await config.update('chat.agent.maxRequests', 1, vscode.ConfigurationTarget.Global);
-		assert.strictEqual(config.get<number>('chat.agent.maxRequests'), 1);
+		const mr2 = config.inspect<number>('chat.agent.maxRequests');
+		assert.strictEqual(mr2?.globalValue, 1);
 	});
 });

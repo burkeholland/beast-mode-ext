@@ -16,8 +16,10 @@
         .setting-main { flex: 1; min-width: 0; }
         .setting-main label { font-weight: 500; display: inline-block; margin-bottom: 2px; }
         .desc { font-size: 11px; opacity: .75; line-height: 1.3; }
-        input[type=number], input[type=text] { width: 140px; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 4px; padding: 2px 6px; height: 24px; outline: none; }
-        input[type=number]:focus, input[type=text]:focus { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 1px var(--vscode-focusBorder); }
+  input[type=number], input[type=text] { width: 140px; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 4px; padding: 2px 6px; height: 24px; outline: none; }
+  input[type=number]:focus, input[type=text]:focus, textarea:focus { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 1px var(--vscode-focusBorder); }
+  textarea { width: 340px; min-height: 64px; resize: vertical; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 4px; padding: 6px 8px; outline: none; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
+  textarea.invalid { border-color: var(--vscode-inputValidation-errorBorder); box-shadow: 0 0 0 1px var(--vscode-inputValidation-errorBorder); }
         input.number-invalid { border-color: var(--vscode-inputValidation-errorBorder); box-shadow: 0 0 0 1px var(--vscode-inputValidation-errorBorder); }
         .switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
         .switch input { opacity:0; width:0; height:0; }
@@ -55,9 +57,11 @@
         </div>
       </div>
     </div>
+  <script type="application/json" id="initialState" nonce="%%NONCE%%">%%STATE_JSON%%</script>
     <script nonce="%%NONCE%%">
         const vscode = acquireVsCodeApi();
-        let currentState = %%STATE_JSON%%;
+      const stateEl = document.getElementById('initialState');
+      let currentState = stateEl ? JSON.parse(stateEl.textContent || 'null') : null;
         function render(){
           const container=document.getElementById('settingsContainer');
           container.innerHTML='';
@@ -74,10 +78,22 @@
           const value=currentState.settings[def.key];
           const row=document.createElement('div'); row.className='setting';
           const main=document.createElement('div'); main.className='setting-main';
-          const label=document.createElement('label'); label.textContent=def.key.split('.').slice(-1)[0]; main.appendChild(label);
+          const label=document.createElement('label'); label.textContent=def.title || def.key.split('.').slice(-1)[0]; main.appendChild(label);
           const desc=document.createElement('div'); desc.className='desc'; desc.textContent=def.description; main.appendChild(desc);
           row.appendChild(main);
-          if(def.type==='boolean'){
+          if(Array.isArray(def.options) && def.options.length){
+            const select=document.createElement('select');
+            select.style.height='24px';
+            select.style.background='var(--vscode-input-background)';
+            select.style.color='var(--vscode-input-foreground)';
+            select.style.border='1px solid var(--vscode-input-border, var(--vscode-widget-border))';
+            select.style.borderRadius='4px';
+            for(const opt of def.options){
+              const o=document.createElement('option'); o.value=opt.value; o.textContent=opt.label||opt.value; if(String(value)===opt.value) o.selected=true; select.appendChild(o);
+            }
+            select.addEventListener('change',()=>vscode.postMessage({type:'updateSetting', key:def.key, value:select.value}));
+            row.appendChild(select);
+          } else if(def.type==='boolean'){
             const wrap=document.createElement('label'); wrap.className='switch';
             const input=document.createElement('input'); input.type='checkbox'; input.checked=!!value;
             input.addEventListener('change',()=>vscode.postMessage({type:'updateSetting', key:def.key, value:input.checked}));
@@ -86,6 +102,11 @@
           } else if(def.type==='number'){
             const input=document.createElement('input'); input.type='number'; if(def.min!==undefined) input.min=def.min; if(def.step!==undefined) input.step=def.step; input.value=value??'';
             let debounce; input.addEventListener('input',()=>{ clearTimeout(debounce); const num=Number(input.value); if(!Number.isInteger(num) || (def.min!==undefined && num<def.min)){ input.classList.add('number-invalid'); return;} input.classList.remove('number-invalid'); debounce=setTimeout(()=>vscode.postMessage({type:'updateSetting', key:def.key, value:num}),300);});
+            row.appendChild(input);
+          } else if(def.type==='json'){
+            const input=document.createElement('textarea');
+            try { input.value = JSON.stringify(value ?? null, null, 2); } catch { input.value='null'; }
+            let debounce; input.addEventListener('input',()=>{ clearTimeout(debounce); try { const parsed = JSON.parse(input.value); input.classList.remove('invalid'); debounce=setTimeout(()=>vscode.postMessage({type:'updateSetting', key:def.key, value:parsed}),500); } catch { input.classList.add('invalid'); }});
             row.appendChild(input);
           } else {
             const input=document.createElement('input'); input.type='text'; input.value=value??''; let debounce; input.addEventListener('input',()=>{ clearTimeout(debounce); debounce=setTimeout(()=>vscode.postMessage({type:'updateSetting', key:def.key, value:input.value}),400);}); row.appendChild(input);
@@ -116,9 +137,8 @@
         function openCapture(command){ captureCommand=command; capturedSeq=null; confirmBtn.disabled=true; display.textContent=''; overlay.style.display='flex'; overlay.focus(); }
         function closeCapture(){ overlay.style.display='none'; captureCommand=null; }
         overlay.addEventListener('keydown',ev=>{ ev.preventDefault(); ev.stopPropagation(); const parts=[]; if(ev.ctrlKey) parts.push('ctrl'); if(ev.metaKey) parts.push(navigator.platform.includes('Mac')?'cmd':'meta'); if(ev.altKey) parts.push('alt'); if(ev.shiftKey) parts.push('shift'); const key=ev.key.toLowerCase(); if(!['control','shift','alt','meta'].includes(key)) parts.push(normalizeKey(key)); capturedSeq=parts.join('+'); display.textContent=capturedSeq; confirmBtn.disabled=!capturedSeq; });
-        function normalizeKey(k){ const map={arrowleft:'left',arrowright:'right',arrowup:'up',arrowdown:'down',' ':'space'}; return map[k]||k; }
-        window.addEventListener('message',e=>{ const m=e.data; if(m.type==='state'){ currentState=m.state; render(); }});
-        render(); vscode.postMessage({type:'requestState'});
+  function normalizeKey(k){ const map={arrowleft:'left',arrowright:'right',arrowup:'up',arrowdown:'down',' ':'space'}; return map[k]||k; }
+  render();
     </script>
 </body>
 </html>

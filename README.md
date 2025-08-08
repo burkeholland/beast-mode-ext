@@ -29,12 +29,38 @@ Commands (via Command Palette):
 
 Changes apply to User settings (global) immediately and the view refreshes automatically.
 
-## Contributed Settings
+## Contributed (Surfaced) Settings
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `chat.tools.autoApprove` | boolean | false | Automatically approve AI tool executions. |
-| `chat.agent.maxRequests` | number | 5 | Maximum concurrent AI agent requests. |
+These settings are surfaced by Beast Mode (they remain normal VS Code user settings):
+
+| Setting | Type | Description |
+|---------|------|-------------|
+| `chat.tools.autoApprove` | boolean | Automatically approve AI tool executions. |
+| `chat.agent.maxRequests` | number | Maximum concurrent AI agent requests. |
+| `chat.commandCenter.enabled` | boolean | Enable the Chat Command Center UI. |
+| `chat.todoListTool.enabled` | boolean | Enable experimental TODO list chat tool. |
+| `chat.editor.wordWrap` | string | Controls word wrap in chat editors. |
+| `github.copilot.chat.agent.enabled` | boolean | Enable the Copilot Chat agent. |
+| `github.copilot.nextEditSuggestions.enabled` | boolean | Enable Copilot next edit suggestions. |
+| `github.copilot.chat.commitMessageGeneration.instructions` | json | JSON instructions for commit message generation. |
+| `githubPullRequests.codingAgent.enabled` | boolean | Enable the GitHub PR Coding Agent. |
+| `githubPullRequests.experimental.chat` | boolean | Enable experimental chat in GitHub PRs. |
+| `githubPullRequests.codingAgent.autoCommitAndPush` | boolean | Allow coding agent to auto commit & push. |
+| `githubPullRequests.codingAgent.uiIntegration` | boolean | Show coding agent UI integration elements. |
+| `githubPullRequests.pushBranch` | string | When to push the current branch (always / etc). |
+| `workbench.sideBar.location` | string | Location of the primary sidebar. |
+| `workbench.activityBar.location` | string | Location of the Activity Bar (default or top). |
+| `workbench.secondarySideBar.defaultVisibility` | string | Default visibility of secondary side bar. |
+| `workbench.colorTheme` | string | Current color theme. |
+| `workbench.iconTheme` | string | File icon theme. |
+| `workbench.productIconTheme` | string | Product icon theme. |
+| `editor.minimap.enabled` | boolean | Show minimap. |
+| `terminal.integrated.tabs.location` | string | Location of terminal tabs. |
+| `terminal.integrated.fontFamily` | string | Terminal font family. |
+| `terminal.integrated.suggest.quickSuggestions` | json | Terminal quick suggestions config. |
+| `git.confirmSync` | boolean | Confirm sync before running. |
+| `git.autofetch` | boolean | Auto-fetch remotes. |
+| `window.commandCenter` | boolean | Enable command center in title bar. |
 
 ## Roadmap Ideas
 
