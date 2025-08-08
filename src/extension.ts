@@ -33,6 +33,7 @@ interface SettingsState {
 class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 	public static readonly viewType = 'ultimateAiSettings';
 	private view?: vscode.WebviewView;
+	private disposables: vscode.Disposable[] = [];
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -226,6 +227,19 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 		};
 		webviewView.webview.onDidReceiveMessage(msg => this.handleMessage(msg));
 	this.ensureLoadedFromConfig();
+		// Re-render when the view becomes visible again (keeps in sync with outside changes)
+		this.disposables.push(
+			webviewView.onDidChangeVisibility(() => {
+				if (webviewView.visible) {
+					this.postState();
+				}
+			})
+		);
+		this.postState();
+	}
+
+	/** Expose a safe refresh to re-render the webview */
+	public refresh() {
 		this.postState();
 	}
 
@@ -329,6 +343,61 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 		return path.join(home, '.config', appName, 'User', 'keybindings.json');
 	}
 
+	/** Begin watching external sources that can affect our state (config, keybindings, config.json) */
+	public startExternalWatchers() {
+		// 1) Configuration changes: only refresh if relevant settings changed
+		this.disposables.push(
+			vscode.workspace.onDidChangeConfiguration(e => {
+				// If any tracked setting key is affected, refresh
+				const affected = this.settingDefinitions.some(def => e.affectsConfiguration(def.key));
+				if (affected) {
+					this.postState();
+				}
+			})
+		);
+
+		// 2) User keybindings.json changes
+		const kbPath = this.getUserKeybindingsPath();
+		if (kbPath && fs.existsSync(kbPath)) {
+			try {
+				const watcher = fs.watch(kbPath, { persistent: false }, () => {
+					// Debounce minimal: schedule postState on microtask to collapse bursts
+					setTimeout(() => this.postState(), 50);
+				});
+				this.disposables.push(new vscode.Disposable(() => watcher.close()));
+			} catch {
+				// Fallback to watchFile if fs.watch fails
+				fs.watchFile(kbPath, { interval: 1000 }, () => this.postState());
+				this.disposables.push(new vscode.Disposable(() => fs.unwatchFile(kbPath)));
+			}
+		}
+
+		// 3) Our own media/config.json (setting definitions / kb list) changes
+		const cfgPath = path.join(this.context.extensionPath, 'media', 'config.json');
+		if (fs.existsSync(cfgPath)) {
+			try {
+				const watcher = fs.watch(cfgPath, { persistent: false }, () => {
+					// Reload definitions and re-render
+					this.ensureLoadedFromConfig();
+					this.postState();
+				});
+				this.disposables.push(new vscode.Disposable(() => watcher.close()));
+			} catch {
+				fs.watchFile(cfgPath, { interval: 1000 }, () => {
+					this.ensureLoadedFromConfig();
+					this.postState();
+				});
+				this.disposables.push(new vscode.Disposable(() => fs.unwatchFile(cfgPath)));
+			}
+		}
+	}
+
+	public dispose() {
+		for (const d of this.disposables.splice(0)) {
+			try { d.dispose(); } catch { /* ignore */ }
+		}
+	}
+
 	private async updateSetting(key: string, value: any) {
 		await this.getConfiguration().update(key, value, vscode.ConfigurationTarget.Global);
 		this.postState();
@@ -394,9 +463,14 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 
 export function activate(context: vscode.ExtensionContext) {
 	const provider = new BeastModeSettingsWebviewProvider(context);
+	// Ensure provider disposes resources on deactivate
+	context.subscriptions.push(provider);
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(BeastModeSettingsWebviewProvider.viewType, provider)
 	);
+
+	// Keep webview synchronized with external changes
+	provider.startExternalWatchers();
 
 	context.subscriptions.push(
 		vscode.commands.registerCommand('beast-mode.refreshSettings', () => provider['postState']?.())
