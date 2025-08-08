@@ -11,14 +11,18 @@
         h2 { font-size: 13px; font-weight: 600; margin: 12px 0 6px; text-transform: uppercase; opacity:.8; }
         .section { margin-bottom: 14px; }
         .settings-list { border: 1px solid var(--vscode-tree-indentGuidesStroke, var(--vscode-widget-border, transparent)); border-radius: 6px; overflow: hidden; }
-        .setting { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--vscode-tree-indentGuidesStroke, var(--vscode-widget-border, transparent)); }
+    .setting { display: flex; align-items: flex-start; gap: 12px; padding: 8px 10px; border-bottom: 1px solid var(--vscode-tree-indentGuidesStroke, var(--vscode-widget-border, transparent)); }
         .setting:last-child { border-bottom: none; }
+  .section { position: relative; }
         .setting-main { flex: 1; min-width: 0; }
         .setting-main label { font-weight: 500; display: inline-block; margin-bottom: 2px; }
         .desc { font-size: 11px; opacity: .75; line-height: 1.3; }
-  input[type=number], input[type=text] { width: 140px; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 4px; padding: 2px 6px; height: 24px; outline: none; }
+    /* Controls stacked below description */
+    .setting-main .control { display: block; margin-top: 6px; }
+    /* Make inputs fit in narrow sidebar */
+  input[type=number], input[type=text] { width: 100%; max-width: 100%; box-sizing: border-box; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 4px; padding: 2px 6px; height: 24px; outline: none; }
   input[type=number]:focus, input[type=text]:focus, textarea:focus { border-color: var(--vscode-focusBorder); box-shadow: 0 0 0 1px var(--vscode-focusBorder); }
-  textarea { width: 340px; min-height: 64px; resize: vertical; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 4px; padding: 6px 8px; outline: none; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
+  textarea { width: 100%; max-width: 100%; min-height: 64px; resize: vertical; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, var(--vscode-widget-border)); border-radius: 4px; padding: 6px 8px; outline: none; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; }
   textarea.invalid { border-color: var(--vscode-inputValidation-errorBorder); box-shadow: 0 0 0 1px var(--vscode-inputValidation-errorBorder); }
         input.number-invalid { border-color: var(--vscode-inputValidation-errorBorder); box-shadow: 0 0 0 1px var(--vscode-inputValidation-errorBorder); }
         .switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
@@ -34,10 +38,11 @@
         kbd { font: 11px/1 var(--vscode-font-family); background: var(--vscode-editor-background); padding:2px 6px; border:1px solid var(--vscode-widget-border); border-radius:4px; }
         button.inline { background: var(--vscode-button-secondaryBackground, var(--vscode-button-background)); color: var(--vscode-button-foreground); border:1px solid var(--vscode-button-border, transparent); border-radius:4px; height:24px; padding:0 8px; cursor:pointer; }
         button.inline:hover { background: var(--vscode-button-hoverBackground, var(--vscode-button-secondaryHoverBackground)); }
-        .capture-overlay { position: fixed; inset:0; background: rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:10; }
-        .capture-box { background: var(--vscode-editor-background); padding:24px 28px; border:1px solid var(--vscode-widget-border); border-radius:8px; text-align:center; width:320px; }
-        .capture-box h3 { margin:0 0 12px; font-size:14px; }
-        .capture-display { font-size:16px; margin:8px 0 12px; min-height:22px; }
+  .overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; padding: 8px; background: rgba(0,0,0,.35); backdrop-filter: blur(1px); }
+  .overlay-card { background: var(--vscode-editor-background); color: var(--vscode-foreground); border:1px solid var(--vscode-widget-border); border-radius:8px; padding:10px 12px; display:flex; gap:10px; align-items:center; box-shadow: 0 2px 8px rgba(0,0,0,.25); max-width: 90%; }
+  .overlay-card .msg { font-size:12px; opacity:.9; }
+  .overlay-card button { height: 26px; }
+        
     </style>
 </head>
 <body>
@@ -47,16 +52,7 @@
       <h2>Keybindings</h2>
       <div class="settings-list keybinding-list" id="keybindingsContainer"></div>
     </div>
-    <div class="capture-overlay" id="captureOverlay" role="dialog" aria-modal="true">
-      <div class="capture-box">
-        <h3>Press new shortcut</h3>
-        <div class="capture-display" id="captureDisplay"></div>
-        <div style="display:flex; gap:8px; justify-content:center; margin-top:4px;">
-          <button class="inline" id="captureConfirm" disabled>Confirm</button>
-          <button class="inline" id="captureCancel">Cancel</button>
-        </div>
-      </div>
-    </div>
+    
   <script type="application/json" id="initialState" nonce="%%NONCE%%">%%STATE_JSON%%</script>
     <script nonce="%%NONCE%%">
         const vscode = acquireVsCodeApi();
@@ -69,8 +65,30 @@
             const section=document.createElement('div'); section.className='section';
             const h2=document.createElement('h2'); h2.textContent=group; section.appendChild(h2);
             const list=document.createElement('div'); list.className='settings-list';
-            for(const def of currentState.definitions.filter(d=>d.group===group)) list.appendChild(renderSetting(def));
+            const defs = currentState.definitions.filter(d=>d.group===group);
+            for(const def of defs) list.appendChild(renderSetting(def));
             section.appendChild(list); container.appendChild(section);
+            // Compute common missing extension ids across all defs in the group (intersection)
+            let commonMissing = [];
+            if(defs.length){
+              const start = new Set((defs[0].missingExtensions||[]));
+              for(let i=1;i<defs.length;i++){
+                const next = new Set(defs[i].missingExtensions||[]);
+                for(const id of Array.from(start)){
+                  if(!next.has(id)) start.delete(id);
+                }
+              }
+              commonMissing = Array.from(start);
+            }
+            if(commonMissing.length){
+              const overlay=document.createElement('div'); overlay.className='overlay';
+              const card=document.createElement('div'); card.className='overlay-card';
+              const msg=document.createElement('div'); msg.className='msg';
+              msg.textContent = `Requires extension${commonMissing.length>1?'s':''}: ${commonMissing.join(', ')}`;
+              const btn=document.createElement('button'); btn.className='inline'; btn.textContent='Install';
+              btn.addEventListener('click',()=>vscode.postMessage({ type:'installExtensions', ids: commonMissing }));
+              card.appendChild(msg); card.appendChild(btn); overlay.appendChild(card); section.appendChild(overlay);
+            }
           }
           renderKeybindings();
         }
@@ -80,7 +98,15 @@
           const main=document.createElement('div'); main.className='setting-main';
           const label=document.createElement('label'); label.textContent=def.title || def.key.split('.').slice(-1)[0]; main.appendChild(label);
           const desc=document.createElement('div'); desc.className='desc'; desc.textContent=def.description; main.appendChild(desc);
+          const missing = Array.isArray(def.missingExtensions) ? def.missingExtensions : [];
+          if(missing.length){
+            const warn=document.createElement('div'); warn.className='desc';
+            warn.style.color='var(--vscode-inputValidation-warningForeground, #d19a66)';
+            warn.textContent=`Requires extension${missing.length>1?'s':''}: ${missing.join(', ')}`;
+            main.appendChild(warn);
+          }
           row.appendChild(main);
+          const disabled = Array.isArray(def.missingExtensions) && def.missingExtensions.length>0;
           if(Array.isArray(def.options) && def.options.length){
             const select=document.createElement('select');
             select.style.height='24px';
@@ -88,28 +114,40 @@
             select.style.color='var(--vscode-input-foreground)';
             select.style.border='1px solid var(--vscode-input-border, var(--vscode-widget-border))';
             select.style.borderRadius='4px';
+            select.className='control';
+            if(disabled) select.disabled=true;
             for(const opt of def.options){
               const o=document.createElement('option'); o.value=opt.value; o.textContent=opt.label||opt.value; if(String(value)===opt.value) o.selected=true; select.appendChild(o);
             }
             select.addEventListener('change',()=>vscode.postMessage({type:'updateSetting', key:def.key, value:select.value}));
-            row.appendChild(select);
+            main.appendChild(select);
           } else if(def.type==='boolean'){
-            const wrap=document.createElement('label'); wrap.className='switch';
+            const wrap=document.createElement('label'); wrap.className='switch control';
             const input=document.createElement('input'); input.type='checkbox'; input.checked=!!value;
+            if(disabled) input.disabled=true;
             input.addEventListener('change',()=>vscode.postMessage({type:'updateSetting', key:def.key, value:input.checked}));
             const slider=document.createElement('span'); slider.className='slider';
-            wrap.appendChild(input); wrap.appendChild(slider); row.appendChild(wrap);
+            wrap.appendChild(input); wrap.appendChild(slider); main.appendChild(wrap);
           } else if(def.type==='number'){
-            const input=document.createElement('input'); input.type='number'; if(def.min!==undefined) input.min=def.min; if(def.step!==undefined) input.step=def.step; input.value=value??'';
+            const input=document.createElement('input'); input.type='number'; input.className='control'; if(def.min!==undefined) input.min=def.min; if(def.step!==undefined) input.step=def.step; input.value=value??'';
+            if(disabled) input.disabled=true;
             let debounce; input.addEventListener('input',()=>{ clearTimeout(debounce); const num=Number(input.value); if(!Number.isInteger(num) || (def.min!==undefined && num<def.min)){ input.classList.add('number-invalid'); return;} input.classList.remove('number-invalid'); debounce=setTimeout(()=>vscode.postMessage({type:'updateSetting', key:def.key, value:num}),300);});
-            row.appendChild(input);
+            main.appendChild(input);
           } else if(def.type==='json'){
-            const input=document.createElement('textarea');
+            const input=document.createElement('textarea'); input.className='control';
             try { input.value = JSON.stringify(value ?? null, null, 2); } catch { input.value='null'; }
+            if(disabled) input.disabled=true;
             let debounce; input.addEventListener('input',()=>{ clearTimeout(debounce); try { const parsed = JSON.parse(input.value); input.classList.remove('invalid'); debounce=setTimeout(()=>vscode.postMessage({type:'updateSetting', key:def.key, value:parsed}),500); } catch { input.classList.add('invalid'); }});
-            row.appendChild(input);
+            main.appendChild(input);
           } else {
-            const input=document.createElement('input'); input.type='text'; input.value=value??''; let debounce; input.addEventListener('input',()=>{ clearTimeout(debounce); debounce=setTimeout(()=>vscode.postMessage({type:'updateSetting', key:def.key, value:input.value}),400);}); row.appendChild(input);
+            const input=document.createElement('input'); input.type='text'; input.className='control'; input.value=value??''; let debounce; input.addEventListener('input',()=>{ clearTimeout(debounce); debounce=setTimeout(()=>vscode.postMessage({type:'updateSetting', key:def.key, value:input.value}),400);}); main.appendChild(input);
+            if(disabled) input.disabled=true;
+          }
+          if(Array.isArray(def.missingExtensions) && def.missingExtensions.length){
+            const right=document.createElement('div'); right.style.display='flex'; right.style.gap='6px'; right.style.alignItems='center';
+            const btn=document.createElement('button'); btn.className='inline'; btn.textContent='Install';
+            btn.addEventListener('click',()=>vscode.postMessage({ type:'installExtensions', ids: def.missingExtensions }));
+            right.appendChild(btn); row.appendChild(right);
           }
           return row;
         }
@@ -123,21 +161,11 @@
             row.appendChild(main);
             const right=document.createElement('div'); right.style.display='flex'; right.style.gap='6px'; right.style.alignItems='center';
             const k=document.createElement('kbd'); k.textContent=kb.current||'Unassigned'; right.appendChild(k);
-            const btn=document.createElement('button'); btn.className='inline'; btn.textContent='Change'; btn.addEventListener('click',()=>openCapture(kb.command)); right.appendChild(btn);
+      const btn=document.createElement('button'); btn.className='inline'; btn.textContent='Change'; btn.addEventListener('click',()=>vscode.postMessage({ type:'openKeybindings', command: kb.command })); right.appendChild(btn);
             row.appendChild(right); container.appendChild(row);
           }
         }
-        let captureCommand=null; let capturedSeq=null;
-        const overlay=document.getElementById('captureOverlay');
-        const display=document.getElementById('captureDisplay');
-        const confirmBtn=document.getElementById('captureConfirm');
-        const cancelBtn=document.getElementById('captureCancel');
-        cancelBtn.addEventListener('click',closeCapture);
-        confirmBtn.addEventListener('click',()=>{ if(captureCommand && capturedSeq){ vscode.postMessage({type:'updateKeybinding', command:captureCommand, key:capturedSeq}); closeCapture(); }});
-        function openCapture(command){ captureCommand=command; capturedSeq=null; confirmBtn.disabled=true; display.textContent=''; overlay.style.display='flex'; overlay.focus(); }
-        function closeCapture(){ overlay.style.display='none'; captureCommand=null; }
-        overlay.addEventListener('keydown',ev=>{ ev.preventDefault(); ev.stopPropagation(); const parts=[]; if(ev.ctrlKey) parts.push('ctrl'); if(ev.metaKey) parts.push(navigator.platform.includes('Mac')?'cmd':'meta'); if(ev.altKey) parts.push('alt'); if(ev.shiftKey) parts.push('shift'); const key=ev.key.toLowerCase(); if(!['control','shift','alt','meta'].includes(key)) parts.push(normalizeKey(key)); capturedSeq=parts.join('+'); display.textContent=capturedSeq; confirmBtn.disabled=!capturedSeq; });
-  function normalizeKey(k){ const map={arrowleft:'left',arrowright:'right',arrowup:'up',arrowdown:'down',' ':'space'}; return map[k]||k; }
+    
   render();
     </script>
 </body>

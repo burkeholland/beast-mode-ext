@@ -1,42 +1,38 @@
 {
   "settings": [
-  { "key": "chat.tools.autoApprove", "title": "Auto Approve Tools", "description": "Automatically approve tool results without prompting.", "type": "boolean" },
-  { "key": "chat.agent.maxRequests", "title": "Max Agent Requests", "description": "Maximum concurrent agent requests.", "type": "number", "min": 1, "step": 1 },
-  { "key": "chat.commandCenter.enabled", "title": "Chat Command Center", "description": "Enable the Chat Command Center UI.", "type": "boolean" },
-  { "key": "chat.todoListTool.enabled", "title": "TODO List Tool", "description": "Enable the experimental TODO list chat tool.", "type": "boolean" },
-  { "key": "chat.editor.wordWrap", "title": "Chat Editor Wrap", "description": "Controls word wrap in chat editors.", "type": "string", "options": [ { "value": "off", "label": "Off" }, { "value": "on", "label": "On" } ] },
-
-  { "key": "github.copilot.chat.agent.enabled", "title": "Copilot Chat Agent", "description": "Enable the Copilot Chat agent.", "type": "boolean" },
-  { "key": "github.copilot.nextEditSuggestions.enabled", "title": "Next Edit Suggestions", "description": "Enable Copilot next edit suggestions.", "type": "boolean" },
-  { "key": "github.copilot.chat.commitMessageGeneration.instructions", "title": "Commit Message Instructions", "description": "JSON instructions influencing generated commit messages.", "type": "json" },
-
-  { "key": "githubPullRequests.codingAgent.enabled", "title": "PR Coding Agent", "description": "Enable the GitHub PR Coding Agent.", "type": "boolean" },
-  { "key": "githubPullRequests.experimental.chat", "title": "PR Chat (Experimental)", "description": "Enable experimental chat in GitHub PRs.", "type": "boolean" },
-  { "key": "githubPullRequests.codingAgent.autoCommitAndPush", "title": "Agent Auto Commit/Push", "description": "Allow coding agent to automatically commit & push.", "type": "boolean" },
-  { "key": "githubPullRequests.codingAgent.uiIntegration", "title": "Agent UI Integration", "description": "Show coding agent UI integration elements.", "type": "boolean" },
-  { "key": "githubPullRequests.pushBranch", "title": "Push Branch Strategy", "description": "When to push the current branch.", "type": "string", "options": [ { "value": "always", "label": "Always" }, { "value": "prompt", "label": "Prompt" }, { "value": "never", "label": "Never" } ] },
-
-  { "key": "workbench.sideBar.location", "title": "Sidebar Location", "description": "Location of the primary sidebar.", "type": "string", "options": [ { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" } ] },
-  { "key": "workbench.activityBar.location", "title": "Activity Bar Location", "description": "Location of the Activity Bar.", "type": "string", "options": [ { "value": "default", "label": "Default" }, { "value": "top", "label": "Top" } ] },
-  { "key": "workbench.secondarySideBar.defaultVisibility", "title": "Secondary Sidebar Visibility", "description": "Default visibility of the Secondary Side Bar.", "type": "string", "options": [ { "value": "visible", "label": "Visible" }, { "value": "hidden", "label": "Hidden" } ] },
-  { "key": "workbench.colorTheme", "title": "Color Theme", "description": "Current color theme.", "type": "string" },
-  { "key": "workbench.iconTheme", "title": "Icon Theme", "description": "File icon theme for files & folders.", "type": "string" },
-  { "key": "workbench.productIconTheme", "title": "Product Icon Theme", "description": "Product icon theme for UI icons.", "type": "string" },
-
-  { "key": "editor.minimap.enabled", "title": "Minimap", "description": "Controls whether the minimap is shown.", "type": "boolean" },
-  { "key": "terminal.integrated.tabs.location", "title": "Terminal Tabs Location", "description": "Location of the terminal tabs.", "type": "string", "options": [ { "value": "left", "label": "Left" }, { "value": "right", "label": "Right" } ] },
-  { "key": "terminal.integrated.fontFamily", "title": "Terminal Font Family", "description": "Font family for the integrated terminal.", "type": "string" },
-  { "key": "terminal.integrated.suggest.quickSuggestions", "title": "Terminal Quick Suggestions", "description": "Quick suggestion enablement per terminal context.", "type": "json" },
-
-  { "key": "git.confirmSync", "title": "Confirm Sync", "description": "Confirm sync operations before running.", "type": "boolean" },
-  { "key": "git.autofetch", "title": "Auto Fetch", "description": "Automatically fetch from remotes.", "type": "boolean" },
-
-  { "key": "window.commandCenter", "title": "Command Center", "description": "Enable the Command Center in the title bar.", "type": "boolean" }
+    {
+      "group": "Chat",
+      "settings": [
+        { "key": "chat.tools.autoApprove", "title": "Auto Approve Tools", "description": "Automatically approve tool calls in chat without being asked to continue. NOTE: this can be dangerous as it approves terminal commands as well.", "type": "boolean" },
+        { "key": "chat.agent.maxRequests", "title": "Max Agent Requests", "description": "Maximum requests before the agent tells you it has been working for a long time.", "type": "number", "min": 1, "step": 1 },
+        { "key": "chat.todoListTool.enabled", "title": "TODO List Tool", "description": "Enable the experimental TODO list chat tool.", "type": "boolean" },
+        { "key": "chat.editor.wordWrap", "title": "Chat Editor Wrap", "description": "Wrap code in chat responses so it doesn't make you scroll to see it.", "type": "string", "options": [ { "value": "off", "label": "Off" }, { "value": "on", "label": "On" } ] }
+      ]
+    },
+    {
+      "group": "GitHub Copilot Coding Agent",
+      "settings": [
+        { "key": "githubPullRequests.codingAgent.enabled", "title": "Async Coding Agent", "description": "Enable the async GitHub Copilot Coding Agent.", "type": "boolean" },
+        { "key": "githubPullRequests.codingAgent.uiIntegration", "title": "Agent UI Integration", "description": "Show \"Delegate to coding agent button\" in chat box.", "type": "boolean" },
+        { "key": "githubPullRequests.experimental.chat", "title": "PR Chat (Experimental)", "description": "Enable experimental chat in GitHub PRs.", "type": "boolean" },
+        { "key": "githubPullRequests.codingAgent.autoCommitAndPush", "title": "Agent Auto Commit/Push", "description": "Allow coding agent to automatically commit & push.", "type": "boolean" }
+  ],
+  "requiresExtension": "GitHub.vscode-pull-request-github"
+    },
+    {
+      "group": "Workbench",
+      "settings": [
+        { "key": "workbench.secondarySideBar.defaultVisibility", "title": "Secondary Sidebar Visibility", "description": "Default visibility of the Secondary Side Bar.", "type": "string", "options": [ { "value": "visible", "label": "Visible" }, { "value": "hidden", "label": "Hidden" } ] }
+      ]
+    },
+    {
+      "group": "Terminal",
+      "settings": [
+        { "key": "terminal.integrated.suggest.quickSuggestions", "title": "Terminal Quick Suggestions", "description": "Quick suggestion enablement per terminal context.", "type": "json" }
+      ]
+    }
   ],
   "keybindings": [
-    { "command": "workbench.action.chat.openInEditor", "title": "Open Chat in Editor", "default": "ctrl+alt+u", "when": "editorTextFocus" },
-    { "command": "beast-mode.toggleAutoApprove", "title": "Beast Mode: Toggle Auto Approve" },
-    { "command": "beast-mode.setMaxRequests", "title": "Beast Mode: Set Max Requests" },
-    { "command": "beast-mode.refreshSettings", "title": "Beast Mode: Refresh Settings View" }
+    { "command": "workbench.action.chat.openInEditor", "title": "Open Chat in Editor", "default": "ctrl+alt+u", "when": "editorTextFocus" }
   ]
 }
