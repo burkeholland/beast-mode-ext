@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <!-- Activity Bar icon spec: 24x24, single color, centered. Max-fill paw with minimal margins and intentional overlaps. -->
+  <!-- Toes (outer slightly lower, inner slightly higher) -->
+  <circle cx="3.6" cy="6.2" r="3.3" fill="currentColor"/>
+  <circle cx="8.8" cy="5.2" r="3.3" fill="currentColor"/>
+  <circle cx="15.2" cy="5.2" r="3.3" fill="currentColor"/>
+  <circle cx="20.4" cy="6.2" r="3.3" fill="currentColor"/>
+  <!-- Main pad (broad ellipse, overlaps toes, ~0.5px bottom margin) -->
+  <ellipse cx="12" cy="15.25" rx="11.2" ry="8.25" fill="currentColor"/>
+</svg>

@@ -13,11 +13,11 @@
         {
           "key": "chat.agent.maxRequests",
           "title": "Max Agent Requests",
-          "description": "Maximum requests before the agent tells.",
+          "description": "Maximum requests before the agent stops.",
           "type": "number",
           "min": 1,
           "step": 1,
-          "info": "Keeps the agent running without asking you if you want to continue."
+          "info": "Keeps the agent running without asking you if you want to continue. 500 pretty much guarantees it will never stop and ask."
         },
         {
           "key": "chat.todoListTool.enabled",
@@ -27,8 +27,8 @@
         },
         {
           "key": "chat.editor.wordWrap",
-          "title": "Chat Editor Wrap",
-          "description": "Wrap code in chat responses.",
+          "title": "Wrap Code Blocks",
+          "description": "Toggle word wrap in code blocks.",
           "type": "string",
           "options": [
             {
@@ -39,7 +39,8 @@
               "value": "on",
               "label": "On"
             }
-          ]
+          ],
+          "info": "Chat is frequently used in the sidebar where vertical space is constrained. Turning on wrapping makes it so that you don't have to scroll code blocks to read them."
         }
       ]
     },
@@ -140,6 +141,12 @@
       "title": "Open Chat in Editor",
       "default": "ctrl+alt+u",
       "when": "editorTextFocus"
+    },
+    {
+      "command": "workbench.action.chat.submit",
+      "title": "Submit Chat Message",
+      "default": "ctrl+enter",
+      "when": ""
     }
   ]
 }

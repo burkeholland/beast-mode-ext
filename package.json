@@ -2,7 +2,7 @@
   "name": "beast-mode",
   "displayName": "Beast Mode",
   "description": "The ultimate VS Code configuration for AI coding",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "beast-mode",
   "engines": {
     "vscode": "^1.103.0"
@@ -36,7 +36,7 @@
         {
           "id": "ultimateAiContainer",
           "title": "Beast Mode",
-          "icon": "media/ultimate-ai.svg"
+          "icon": "media/icons/paw-circuit.svg"
         }
       ]
     },
@@ -46,7 +46,7 @@
           "type": "webview",
           "id": "ultimateAiSettings",
           "name": "Settings",
-          "icon": "media/ultimate-ai.svg"
+          "icon": "media/icons/paw-circuit.svg"
         }
       ]
     },
