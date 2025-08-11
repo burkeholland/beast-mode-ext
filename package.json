@@ -2,7 +2,7 @@
   "name": "beast-mode",
   "displayName": "Beast Mode",
   "description": "The ultimate VS Code configuration for AI coding",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "publisher": "beast-mode",
   "engines": {
     "vscode": "^1.103.0"
@@ -31,32 +31,25 @@
         "title": "Beast Mode: Refresh Settings View"
       }
     ],
-  "viewsContainers": {
+    "viewsContainers": {
       "activitybar": [
         {
-          "id": "ultimateAiContainer",
+          "id": "beastModeContainer",
           "title": "Beast Mode",
-          "icon": "media/icons/paw-circuit.svg"
+          "icon": "media/icons/lion-head.svg"
         }
       ]
     },
     "views": {
-      "ultimateAiContainer": [
+      "beastModeContainer": [
         {
           "type": "webview",
-          "id": "ultimateAiSettings",
+          "id": "beastModeSettings",
           "name": "Settings",
-          "icon": "media/icons/paw-circuit.svg"
+          "icon": "media/icons/lion-head.svg"
         }
       ]
-    },
-    "keybindings": [
-      {
-        "command": "workbench.action.chat.openInEditor",
-        "key": "ctrl+alt+u",
-        "when": "editorTextFocus"
-      }
-    ]
+  }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -65,6 +58,9 @@
     "pretest": "npm run compile && npm run lint",
     "lint": "eslint src",
     "test": "vscode-test"
+  },
+  "dependencies": {
+    "jsonc-parser": "^3.3.1"
   },
   "devDependencies": {
     "@types/vscode": "^1.102.0",

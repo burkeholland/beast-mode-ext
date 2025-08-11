@@ -4,7 +4,7 @@ Purpose: Help an AI agent rapidly extend and maintain this VS Code extension ("B
 
 ## 1. Architecture Snapshot
 - TypeScript VS Code extension. Entry: `src/extension.ts`; compiled JS emitted to `out/` via `tsc` (see `tsconfig.json`).
-- No `activationEvents` declared → extension loads immediately and registers a single `WebviewViewProvider` (`ultimateAiSettings`).
+- No `activationEvents` declared → extension loads immediately and registers a single `WebviewViewProvider` (`beastModeSettings`).
 - UI: Static HTML template at `media/settingsWebview.html` loaded, then placeholders replaced: `%%CSP%%`, `%%NONCE%%`, `%%STATE_JSON%%`.
 - State object shape (`SettingsState`) = `{ settings, definitions, groups, keybindings }` regenerated on every change and inlined as JSON (no message passing after initial full render besides user->extension messages).
 - Settings metadata lives in code (`settingDefinitions` array) – this is the single source of truth for what appears in the view (not contributed via `package.json`).

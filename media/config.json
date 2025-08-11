@@ -17,7 +17,7 @@
           "type": "number",
           "min": 1,
           "step": 1,
-          "info": "Keeps the agent running without asking you if you want to continue. 500 pretty much guarantees it will never stop and ask."
+          "info": "After a certain amount of time, the agent will tell you it has been running for a while and will stop and ask you if you want to continue. Setting this to 500 will effectively keep the agent running indefinitely without interruptions."
         },
         {
           "key": "chat.todoListTool.enabled",

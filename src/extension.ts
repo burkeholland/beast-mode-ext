@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { parse as parseJsonc } from 'jsonc-parser';
 
 interface SettingDefinition {
     key: string;
@@ -27,6 +28,23 @@ interface KeybindingEntry {
     default?: string;
     when?: string;
     current?: string;
+    overridden?: boolean;
+}
+
+interface KeybindingToggle {
+    key: string;
+    title: string;
+    description: string;
+    keybinding: {
+        command: string;
+        key: string;
+        when?: string;
+    };
+    disables?: Array<{
+        command: string;
+        key: string;
+        when?: string;
+    }>;
 }
 
 interface SettingsState {
@@ -34,10 +52,11 @@ interface SettingsState {
     definitions: SettingDefinition[];
     groups: string[];
     keybindings: KeybindingEntry[];
+    keybindingToggles: Array<KeybindingToggle & { enabled: boolean }>;
 }
 
 class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'ultimateAiSettings';
+    public static readonly viewType = 'beastModeSettings';
     private view?: vscode.WebviewView;
     private disposables: vscode.Disposable[] = [];
 
@@ -46,6 +65,8 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
     private settingDefinitions: SettingDefinition[] = [];
 
     private configKeybindings: { command: string; title?: string; default?: string; when?: string }[] = [];
+
+    private keybindingToggles: KeybindingToggle[] = [];
 
     private ensureLoadedFromConfig() {
         try {
@@ -113,10 +134,47 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
                 if (Array.isArray(json?.keybindings)) {
                     this.configKeybindings = json.keybindings as any[];
                 }
+                // Prefer explicit keybindingToggles if provided; else derive from keybindings list
+                if (Array.isArray(json?.keybindingToggles) && json.keybindingToggles.length) {
+                    this.keybindingToggles = (json.keybindingToggles as any[]).map(t => this.normalizeKeybindingToggle(t)).filter(Boolean) as KeybindingToggle[];
+                } else if (Array.isArray(json?.keybindings) && json.keybindings.length) {
+                    this.keybindingToggles = this.deriveKeybindingToggles(json.keybindings as any[]);
+                }
             }
         } catch {
             // ignore and keep defaults
         }
+    }
+
+    private normalizeKeybindingToggle(input: any): KeybindingToggle | undefined {
+        if (!input || typeof input !== 'object') { return undefined; }
+        const key = String(input.key || input.id || input.keyId || input.keybinding?.command || input.command || '');
+        const title = String(input.title || input.name || input.keybinding?.title || input.command || key || 'Keybinding');
+        const description = String(input.description || input.keybinding?.command || input.command || title);
+        const kb = input.keybinding || { command: input.command, key: input.key || input.default, when: input.when };
+        if (!kb || !kb.command || !kb.key) { return undefined; }
+        const togg: KeybindingToggle = {
+            key,
+            title,
+            description,
+            keybinding: { command: String(kb.command), key: String(kb.key), when: kb.when ? String(kb.when) : undefined },
+            disables: Array.isArray(input.disables) ? input.disables.map((d: any) => ({ command: String(d.command), key: String(d.key), when: d.when ? String(d.when) : undefined })) : undefined
+        };
+        return togg;
+    }
+
+    private deriveKeybindingToggles(items: Array<{ command: string; title?: string; default?: string; when?: string }>): KeybindingToggle[] {
+        const out: KeybindingToggle[] = [];
+        for (const it of items) {
+            if (!it?.command || !it?.default) { continue; }
+            out.push({
+                key: it.command,
+                title: it.title || it.command,
+                description: it.command,
+                keybinding: { command: it.command, key: it.default, when: it.when }
+            });
+        }
+        return out;
     }
 
     private normalizeRequires(input: any): string[] {
@@ -302,11 +360,8 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
             case 'updateSetting':
                 this.updateSetting(message.key, message.value);
                 break;
-            case 'updateKeybinding':
-                this.updateKeybinding(message.command, message.key);
-                break;
-            case 'openKeybindings':
-                this.openKeybindingsForCommand(message.command);
+            case 'toggleKeybinding':
+                this.toggleKeybinding(message.key, message.enabled);
                 break;
             case 'installExtensions':
                 this.installExtensions(Array.isArray(message.ids) ? message.ids : []);
@@ -328,11 +383,12 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
             const missing = requires.filter(id => !vscode.extensions.getExtension(id));
             return { ...d, missingExtensions: missing };
         });
-        const state: SettingsState = {
+    const state: SettingsState = {
             settings: this.collectCurrentSettings(),
             definitions: defsWithAvailability,
             groups: Array.from(new Set(defsWithAvailability.map(d => d.group))),
-            keybindings: this.collectKeybindings()
+            keybindings: this.collectKeybindings(),
+            keybindingToggles: this.collectKeybindingToggles()
         };
     this.view.webview.html = this.getHtml(state);
     }
@@ -347,63 +403,216 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
     }
 
     private collectKeybindings(): KeybindingEntry[] {
-        const contrib = vscode.extensions.getExtension(this.context.extension.id)?.packageJSON?.contributes;
-        const declared: any[] = contrib?.keybindings || [];
-        const commands: any[] = contrib?.commands || [];
-        const mergedList: any[] = [];
-        // Start with config-provided entries (if any)
-        for (const kb of this.configKeybindings) {
-            mergedList.push({ command: kb.command, key: kb.default, when: kb.when });
+        // For now, return empty array since we're replacing with toggles
+        return [];
+    }
+
+    private collectKeybindingToggles(): Array<KeybindingToggle & { enabled: boolean }> {
+        return this.keybindingToggles.map(toggle => ({
+            ...toggle,
+            enabled: this.isKeybindingToggleEnabled(toggle)
+        }));
+    }
+
+    private isKeybindingToggleEnabled(toggle: KeybindingToggle): boolean {
+        const arr = this.readUserKeybindingsArray();
+        if (!arr) { return false; }
+        const hasMainBinding = arr.some((entry: any) =>
+            entry?.command === toggle.keybinding.command &&
+            entry?.key === toggle.keybinding.key
+        );
+        if (!hasMainBinding) { return false; }
+        if (toggle.disables && toggle.disables.length) {
+            const hasAllDisables = toggle.disables.every(disable =>
+                arr.some((entry: any) => entry?.command === `-${disable.command}` && entry?.key === disable.key)
+            );
+            return hasAllDisables;
         }
-        // Then add any declared keybindings not already present
-        for (const kb of declared) {
-            if (!mergedList.find(m => m.command === kb.command)) {
-                mergedList.push(kb);
-            }
+        return true;
+    }
+
+    private async toggleKeybinding(toggleKey: string, enabled: boolean) {
+        const toggle = this.keybindingToggles.find(t => t.key === toggleKey);
+        if (!toggle) {
+            vscode.window.showErrorMessage(`Unknown keybinding toggle: ${toggleKey}`);
+            return;
         }
-        // Attempt to read user keybindings.json to get overrides
-        let overrides: Record<string, string> = {};
-        const userKbPath = this.getUserKeybindingsPath();
-        if (userKbPath && fs.existsSync(userKbPath)) {
-            try {
-                const raw = fs.readFileSync(userKbPath, 'utf8');
-                const sanitized = raw.replace(/\/\*[\s\S]*?\*\/|(^|\n)\s*\/\/.*$/g, '$1');
-                const arr = JSON.parse(sanitized);
-                if (Array.isArray(arr)) {
-                    for (const e of arr) {
-                                    if (e && e.command && e.key) {
-                                        overrides[e.command] = e.key;
-                                    }
+        const ok = await this.openAndMutateKeybindingsFile((arr) => {
+            let out = Array.isArray(arr) ? arr.slice() : [];
+            const disableCommands = new Set<string>((toggle.disables || []).map(d => `-${d.command}`));
+            if (enabled) {
+                // Remove ALL existing entries for this command (any key/when/args)
+                out = out.filter(e => e?.command !== toggle.keybinding.command);
+                // Also remove ALL existing unbindings for listed disables (any key)
+                if (disableCommands.size) {
+                    out = out.filter(e => !(typeof e?.command === 'string' && disableCommands.has(e.command)));
+                }
+                // Add the main keybinding
+                const newBinding: any = { key: toggle.keybinding.key, command: toggle.keybinding.command };
+                if (toggle.keybinding.when) { newBinding.when = toggle.keybinding.when; }
+                out.push(newBinding);
+                // Add unbindings for disables
+                if (toggle.disables) {
+                    for (const d of toggle.disables) {
+                        out.push({ key: d.key, command: `-${d.command}` });
                     }
                 }
+            } else {
+                // Remove ALL entries for this command and ALL unbindings for listed disables
+                out = out.filter(e => {
+                    if (e?.command === toggle.keybinding.command) { return false; }
+                    if (typeof e?.command === 'string' && disableCommands.has(e.command)) { return false; }
+                    return true;
+                });
+            }
+            return out;
+        });
+        if (!ok) {
+            vscode.window.showErrorMessage('Unable to update keybindings. Opening Keyboard Shortcuts (JSON)…');
+            await vscode.commands.executeCommand('workbench.action.openGlobalKeybindingsFile');
+        }
+        this.postState();
+    }
+
+    // Legacy path (unused in package.json mode) - kept for reference or future fallback
+    private readUserKeybindingsArray(): any[] | undefined {
+        // Prefer the exact user keybindings.json for the current profile, not the default/read-only doc
+        const profileKb = this.getUserKeybindingsPath();
+        if (profileKb) {
+            const matchOpenDoc = vscode.workspace.textDocuments.find(d => {
+                try {
+                    // Compare fsPath exactly (case-insensitive on Windows)
+                    const a = (d.uri.fsPath || d.fileName);
+                    if (!a) { return false; }
+                    return process.platform === 'win32'
+                        ? a.toLowerCase() === profileKb.toLowerCase()
+                        : a === profileKb;
+                } catch { return false; }
+            });
+            if (matchOpenDoc) {
+                try {
+                    const parsed = parseJsonc(matchOpenDoc.getText());
+                    if (Array.isArray(parsed)) { return parsed; }
+                } catch { /* ignore */ }
+            }
+            // Fallback to file-system read
+            if (fs.existsSync(profileKb)) {
+                try {
+                    const raw = fs.readFileSync(profileKb, 'utf8');
+                    const arr = parseJsonc(raw);
+                    if (Array.isArray(arr)) { return arr; }
+                } catch { /* ignore */ }
+            }
+        }
+        return undefined;
+    }
+
+    // removed package.json mutation helpers (not reliable for runtime toggling)
+
+    private async openAndMutateKeybindingsFile(mutator: (arr: any[]) => any[]): Promise<boolean> {
+        try {
+            await vscode.commands.executeCommand('workbench.action.openGlobalKeybindingsFile');
+        } catch { /* ignore */ }
+
+        // Wait briefly for the editor to open
+        let kbDoc: vscode.TextDocument | undefined;
+        const profileKb = this.getUserKeybindingsPath();
+        for (let i = 0; i < 15; i++) {
+            const active = vscode.window.activeTextEditor?.document;
+            if (active && this.isUserKeybindingsDocument(active)) {
+                kbDoc = active;
+                break;
+            }
+            const found = vscode.workspace.textDocuments.find(d => this.isUserKeybindingsDocument(d));
+            if (found) { kbDoc = found; break; }
+            await new Promise(res => setTimeout(res, 100));
+        }
+        // Fallback: explicitly open the file-based user keybindings
+        if (!kbDoc && profileKb) {
+            try {
+                const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(profileKb));
+                await vscode.window.showTextDocument(doc, { preview: false });
+                kbDoc = doc;
             } catch { /* ignore */ }
         }
-        return mergedList.map(kb => {
-            const cmdMeta = commands.find(c => c.command === kb.command);
-            const cfgMeta = this.configKeybindings.find(c => c.command === kb.command);
-            return {
-                command: kb.command,
-                title: cfgMeta?.title || cmdMeta?.title || kb.command,
-                default: kb.key,
-                when: kb.when,
-                current: overrides[kb.command] || kb.key
-            } as KeybindingEntry;
-        });
+        if (!kbDoc) { return false; }
+
+        let curArr: any[] = [];
+        try {
+            const parsed = parseJsonc(kbDoc.getText());
+            if (Array.isArray(parsed)) { curArr = parsed; }
+        } catch { /* ignore */ }
+
+        const newArr = mutator(curArr);
+        const newText = JSON.stringify(newArr, null, 2);
+        if (kbDoc.getText() === newText) { return true; }
+
+        const edit = new vscode.WorkspaceEdit();
+        const fullRange = new vscode.Range(0, 0, kbDoc.lineCount, kbDoc.lineAt(Math.max(0, kbDoc.lineCount - 1)).text.length);
+        edit.replace(kbDoc.uri, fullRange, newText);
+        const applied = await vscode.workspace.applyEdit(edit);
+        if (!applied) { return false; }
+        try { await kbDoc.save(); } catch { /* ignore */ }
+        return true;
+    }
+
+    /** Detect if a TextDocument corresponds to the current profile's user keybindings.json */
+    private isUserKeybindingsDocument(doc: vscode.TextDocument): boolean {
+        try {
+            const profileKb = this.getUserKeybindingsPath();
+            const fsPath = doc.uri.fsPath || doc.fileName || '';
+            if (profileKb) {
+                const a = process.platform === 'win32' ? (fsPath.toLowerCase()) : fsPath;
+                const b = process.platform === 'win32' ? (profileKb.toLowerCase()) : profileKb;
+                if (a === b) { return true; }
+            }
+            // Accept vscode-userdata URI that represents the user keybindings.json
+            if (doc.uri.scheme === 'vscode-userdata') {
+                const p = (doc.uri.path || '').toLowerCase();
+                // Typical path: /User/keybindings.json or /User/profiles/<id>/keybindings.json
+                if (/\/user\//.test(p) && p.endsWith('keybindings.json')) {
+                    return true;
+                }
+            }
+        } catch { /* ignore */ }
+        return false;
+    }
+
+    private getUserSettingsRootDir(): string | undefined {
+        // Prefer VS Code's current profile settings directory if available
+        const appSettingsPath = (vscode.env as any)?.appSettingsPath as string | undefined;
+        
+        if (appSettingsPath && typeof appSettingsPath === 'string' && appSettingsPath.length > 0) {
+            return appSettingsPath; // e.g., ~/.config/Code - Insiders/User/profiles/<id>
+        }
+        // Fallback: derive config directory name based on app variant
+        const display = (vscode.env as any)?.appName || '';
+        let appName = 'Code';
+        const lower = display.toLowerCase();
+        if (lower.includes('insiders')) {
+            appName = 'Code - Insiders';
+        } else if (lower.includes('oss')) {
+            appName = 'Code - OSS';
+        } else if (lower.includes('codium')) {
+            appName = 'VSCodium';
+        } else {
+            appName = 'Code';
+        }
+        const home = process.env.HOME || process.env.USERPROFILE;
+        if (!home) {
+            return undefined;
+        }
+        const fallbackPath = process.platform === 'win32' 
+            ? path.join(home, 'AppData', 'Roaming', appName, 'User')
+            : process.platform === 'darwin' 
+            ? path.join(home, 'Library', 'Application Support', appName, 'User')
+            : path.join(home, '.config', appName, 'User');
+        return fallbackPath;
     }
 
     private getUserKeybindingsPath(): string | undefined {
-        const appName = process.platform === 'darwin' ? 'Code' : (process.env.VSCODE_CWD?.includes('oss') ? 'Code - OSS' : 'Code');
-        const home = process.env.HOME || process.env.USERPROFILE;
-            if (!home) {
-                return undefined;
-            }
-            if (process.platform === 'win32') {
-                return path.join(home, 'AppData', 'Roaming', appName, 'User', 'keybindings.json');
-            }
-            if (process.platform === 'darwin') {
-                return path.join(home, 'Library', 'Application Support', appName, 'User', 'keybindings.json');
-            }
-        return path.join(home, '.config', appName, 'User', 'keybindings.json');
+        const root = this.getUserSettingsRootDir();
+        return root ? path.join(root, 'keybindings.json') : undefined;
     }
 
     /** Begin watching external sources that can affect our state (config, keybindings, config.json) */
@@ -424,19 +633,32 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
             vscode.extensions.onDidChange(() => this.postState())
         );
 
-        // 2) User keybindings.json changes
-        const kbPath = this.getUserKeybindingsPath();
-        if (kbPath && fs.existsSync(kbPath)) {
-            try {
-                const watcher = fs.watch(kbPath, { persistent: false }, () => {
-                    // Debounce minimal: schedule postState on microtask to collapse bursts
-                    setTimeout(() => this.postState(), 50);
-                });
-                this.disposables.push(new vscode.Disposable(() => watcher.close()));
-            } catch {
-                // Fallback to watchFile if fs.watch fails
-                fs.watchFile(kbPath, { interval: 1000 }, () => this.postState());
-                this.disposables.push(new vscode.Disposable(() => fs.unwatchFile(kbPath)));
+        // 2) User keybindings.json changes - watch for changes to update toggle states
+        const profileKb = this.getUserKeybindingsPath();
+        if (profileKb) {
+            const kbDir = path.dirname(profileKb);
+            // Watch the file if it exists
+            if (fs.existsSync(profileKb)) {
+                try {
+                    const watcher = fs.watch(profileKb, { persistent: false }, () => {
+                        setTimeout(() => this.postState(), 50);
+                    });
+                    this.disposables.push(new vscode.Disposable(() => watcher.close()));
+                } catch {
+                    fs.watchFile(profileKb, { interval: 1000 }, () => this.postState());
+                    this.disposables.push(new vscode.Disposable(() => fs.unwatchFile(profileKb)));
+                }
+            }
+            // Also watch the parent directory for create/rename of keybindings.json
+            if (fs.existsSync(kbDir)) {
+                try {
+                    const dirWatcher = fs.watch(kbDir, { persistent: false }, (eventType, filename) => {
+                        if (typeof filename === 'string' && filename.toLowerCase() === 'keybindings.json') {
+                            setTimeout(() => this.postState(), 50);
+                        }
+                    });
+                    this.disposables.push(new vscode.Disposable(() => dirWatcher.close()));
+                } catch { /* ignore */ }
             }
         }
 
@@ -469,42 +691,6 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
     private async updateSetting(key: string, value: any) {
         await this.getConfiguration().update(key, value, vscode.ConfigurationTarget.Global);
         this.postState();
-    }
-
-    private async updateKeybinding(command: string, key: string) {
-        const filePath = this.getUserKeybindingsPath();
-        if (!filePath) {
-            vscode.window.showErrorMessage('Unable to resolve user keybindings path');
-            return;
-        }
-        let content = '[]';
-        try { if (fs.existsSync(filePath)) { content = fs.readFileSync(filePath, 'utf8'); } } catch { /* ignore */ }
-        const sanitized = content.replace(/\/\*[\s\S]*?\*\/|(^|\n)\s*\/\/.*$/g, '$1');
-        let arr: any[] = [];
-        try { const parsed = JSON.parse(sanitized); if (Array.isArray(parsed)) { arr = parsed; } } catch { /* ignore */ }
-        // Remove prior entries for command so new one is last (highest priority)
-        arr = arr.filter(e => e && e.command !== command);
-        arr.push({ key, command });
-        const newText = JSON.stringify(arr, null, 2);
-        try {
-            fs.writeFileSync(filePath, newText, 'utf8');
-            vscode.window.showInformationMessage(`Keybinding updated: ${key} → ${command}`);
-        } catch (e:any) {
-            vscode.window.showErrorMessage('Failed to write keybindings.json: ' + (e?.message || e));
-        }
-        this.postState();
-    }
-
-    private async openKeybindingsForCommand(command: string) {
-        // Open Keyboard Shortcuts with a query filtering by command id
-        // Supported since VS Code 1.52: workbench.action.openGlobalKeybindings accepts a query string
-        try {
-            await vscode.commands.executeCommand('workbench.action.openGlobalKeybindings', `@command:${command}`);
-            // Focus search box and ensure the query is applied
-            await vscode.commands.executeCommand('keybindings.editor.searchKeybindings');
-        } catch (e) {
-            vscode.window.showErrorMessage('Failed to open Keyboard Shortcuts for command: ' + command);
-        }
     }
 
     private async installExtensions(ids: string[]) {

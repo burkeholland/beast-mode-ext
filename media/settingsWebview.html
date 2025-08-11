@@ -397,16 +397,17 @@
       };
 
       /** Typedefs (for editors) */
-      /**
-       * @typedef {{ key:string,title?:string,description:string,type:'boolean'|'number'|'string'|'json', group?:string, min?:number, step?:number, options?:{value:string,label?:string}[], info?:string, missingExtensions?:string[] }} SettingDef
-       * @typedef {{ command:string, title:string, current?:string }} KeybindingItem
-       * @typedef {{ settings: Record<string, any>, definitions: SettingDef[], groups: string[], keybindings: KeybindingItem[] }} SettingsState
-       */
+  /**
+   * @typedef {{ key:string,title?:string,description:string,type:'boolean'|'number'|'string'|'json', group?:string, min?:number, step?:number, options?:{value:string,label?:string}[], info?:string, missingExtensions?:string[] }} SettingDef
+   * @typedef {{ command:string, title:string, current?:string }} KeybindingItem
+   * @typedef {{ key:string, title:string, description:string, keybinding: { command:string, key:string, when?:string }, disables?: Array<{ command:string, key:string, when?:string }>, enabled:boolean }} KeybindingToggle
+   * @typedef {{ settings: Record<string, any>, definitions: SettingDef[], groups: string[], keybindings: KeybindingItem[], keybindingToggles: KeybindingToggle[] }} SettingsState
+   */
 
       // State
       const stateEl = /** @type {HTMLScriptElement|null} */ (document.getElementById('initialState'));
       /** @type {SettingsState} */
-      let currentState = safeParseJSON(stateEl?.textContent || '') || { settings: {}, definitions: [], groups: [], keybindings: [] };
+  let currentState = safeParseJSON(stateEl?.textContent || '') || { settings: {}, definitions: [], groups: [], keybindings: [], keybindingToggles: [] };
 
       /** DOM roots */
       const settingsRoot = /** @type {HTMLElement} */($('#settingsContainer'));
@@ -521,7 +522,7 @@
       /** Post helpers */
       const postUpdate = (key, value) => vscode.postMessage({ type: 'updateSetting', key, value });
       const postInstall = (ids) => vscode.postMessage({ type: 'installExtensions', ids });
-      const postOpenKb = (command) => vscode.postMessage({ type: 'openKeybindings', command });
+  const postToggleKb = (key, enabled) => vscode.postMessage({ type: 'toggleKeybinding', key, enabled });
 
       /** Controls factory **/
       const makeSelect = (def, value, disabled) => {
@@ -670,17 +671,21 @@
       const renderKeybindings = () => {
         keybindingsRoot.innerHTML = '';
         const frag = document.createDocumentFragment();
-        for (const kb of currentState.keybindings) {
+        for (const kb of currentState.keybindingToggles || []) {
           const row = el('div', { className: 'setting' });
           const main = el('div', { className: 'setting-main' });
-          main.appendChild(el('label', {}, kb.title));
-          main.appendChild(el('div', { className: 'desc' }, kb.command));
+          main.appendChild(el('label', {}, kb.title || kb.keybinding.command));
+          main.appendChild(el('div', { className: 'desc' }, kb.keybinding.command));
           row.appendChild(main);
           const right = el('div', { className: 'setting-right' });
-          right.appendChild(el('kbd', {}, kb.current || 'Unassigned'));
-          const btn = el('button', { className: 'inline', type: 'button' }, 'Change');
-          btn.addEventListener('click', () => postOpenKb(kb.command));
-          right.appendChild(btn);
+          right.appendChild(el('kbd', {}, kb.keybinding.key));
+          // Dedicated toggle for keybindings (no settings update)
+          const kbToggle = /** @type {HTMLLabelElement} */(el('label', { className: 'switch', role: 'switch', 'aria-checked': kb.enabled }));
+          const input = /** @type {HTMLInputElement} */(el('input', { type: 'checkbox', checked: kb.enabled, 'aria-label': kb.title || kb.keybinding.command }));
+          input.addEventListener('change', () => { kbToggle.setAttribute('aria-checked', String(!!input.checked)); postToggleKb(kb.key, !!input.checked); });
+          kbToggle.appendChild(input);
+          kbToggle.appendChild(el('span', { className: 'slider' }));
+          right.appendChild(kbToggle);
           row.appendChild(right);
           frag.appendChild(row);
         }
