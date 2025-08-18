@@ -1,787 +1,763 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { parse as parseJsonc } from 'jsonc-parser';
+import * as https from 'https';
+import { URL } from 'url';
 
+/**
+ * Lightweight shape describing how settings will be rendered in the webview.
+ * This is intentionally minimal and self-explanatory.
+ */
 interface SettingDefinition {
-    key: string;
-    type: 'boolean' | 'number' | 'string' | 'json';
-    title?: string;
-    description: string;
-    group: string;
-    min?: number;
-    max?: number;
-    step?: number;
-    // For string enums, provide available options
-    options?: Array<{ value: string; label?: string }>;
-    // Optional: extension ids required for this setting to work
-    requires?: string[];
-    // Computed at render time: which required extensions are currently missing
-    missingExtensions?: string[];
-    // Optional: extra info shown on hover in the UI
-    info?: string;
-}
-
-interface KeybindingEntry {
-    command: string;
-    title: string;
-    default?: string;
-    when?: string;
-    current?: string;
-    overridden?: boolean;
-}
-
-interface KeybindingToggle {
-    key: string;
-    title: string;
-    description: string;
-    keybinding: {
-        command: string;
-        key: string;
-        when?: string;
-    };
-    disables?: Array<{
-        command: string;
-        key: string;
-        when?: string;
-    }>;
+	key: string;
+	type: 'boolean' | 'number' | 'string' | 'json';
+	title?: string;
+	description?: string;
+	group: string;
+	min?: number;
+	max?: number;
+	step?: number;
+	options?: Array<{ value: string; label?: string }>;
+	requires?: string[];
+	missingExtensions?: string[]; // computed at render time
+	info?: string;
+	default?: any; // optional default value suggested by remote config or inferred
 }
 
 interface SettingsState {
-    settings: Record<string, any>;
-    definitions: SettingDefinition[];
-    groups: string[];
-    keybindings: KeybindingEntry[];
-    keybindingToggles: Array<KeybindingToggle & { enabled: boolean }>;
+	settings: Record<string, any>;
+	definitions: SettingDefinition[];
+	groups: string[];
 }
 
+/**
+ * Webview provider responsible for:
+ * - loading settings metadata (remote or bundled)
+ * - enriching settings using installed extension schemas + live values
+ * - exposing those settings to the webview and applying user changes
+ */
 class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
-    public static readonly viewType = 'beastModeSettings';
-    private view?: vscode.WebviewView;
-    private disposables: vscode.Disposable[] = [];
+	public static readonly viewType = 'beastModeSettings';
 
-    constructor(private readonly context: vscode.ExtensionContext) {}
+	private view?: vscode.WebviewView;
+	private disposables: vscode.Disposable[] = [];
+	private settingDefinitions: SettingDefinition[] = [];
+	private pollTimer?: NodeJS.Timeout;
+	private readonly POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+	private readonly GLOBAL_PENDING_KEY = 'remoteConfig.hasPendingChanges';
+	private readonly GLOBAL_LAST_RAW = 'remoteConfig.lastRawText';
+	private readonly GLOBAL_LAST_CHECKED = 'remoteConfig.lastChecked';
 
-    private settingDefinitions: SettingDefinition[] = [];
+	constructor(private readonly context: vscode.ExtensionContext) {}
 
-    private configKeybindings: { command: string; title?: string; default?: string; when?: string }[] = [];
+	// -------------------------
+	// Public lifecycle methods
+	// -------------------------
 
-    private keybindingToggles: KeybindingToggle[] = [];
+	/** Register and initialize the webview when it's resolved by VS Code. */
+	public async resolveWebviewView(webviewView: vscode.WebviewView): Promise<void> {
+		this.view = webviewView;
+		this.view.webview.options = {
+			enableScripts: true,
+			localResourceRoots: [vscode.Uri.file(path.join(this.context.extensionPath, 'media'))]
+		};
 
-    private ensureLoadedFromConfig() {
-        try {
-            const cfgPath = path.join(this.context.extensionPath, 'media', 'config.json');
-            if (fs.existsSync(cfgPath)) {
-                const raw = fs.readFileSync(cfgPath, 'utf8');
-                const json = JSON.parse(raw);
-                if (Array.isArray(json?.settings)) {
-                    // json.settings can be either:
-                    // 1) flat entries: { key, title?, description?, group?, type?, options?, min?, max?, step? }
-                    // 2) grouped entries: { group: string, settings: [ ...flat entries... ] }
-                    const defs: SettingDefinition[] = [];
-                    for (const entry of json.settings) {
-                        // Group container
-                        if (entry && typeof entry.group === 'string' && Array.isArray(entry.settings)) {
-                            const groupName = entry.group as string;
-                            const groupRequires: string[] = this.normalizeRequires(entry.requiresExtension || entry.requiresExtensions || entry.requires);
-                            for (const s of entry.settings) {
-                                if (!s?.key || typeof s.key !== 'string') { continue; }
-                                const enriched = this.inferDefinitionFromSchema(
-                                    s.key,
-                                    s.title,
-                                    s.description,
-                                    // Prefer explicit per-setting group if provided, else container group
-                                    s.group || groupName,
-                                    s.type,
-                                    s.options,
-                                    s.min,
-                                    s.max,
-                                    s.step,
-                                    this.mergeRequires(groupRequires, this.normalizeRequires(s.requiresExtension || s.requiresExtensions || s.requires))
-                                );
-                                // Attach optional info if provided
-                                if (typeof s.info === 'string') {
-                                    (enriched as any).info = s.info;
-                                }
-                                defs.push(enriched);
-                            }
-                            continue;
-                        }
-                        // Flat entry
-                        if (entry?.key && typeof entry.key === 'string') {
-                            const enriched = this.inferDefinitionFromSchema(
-                                entry.key,
-                                entry.title,
-                                entry.description,
-                                entry.group,
-                                entry.type,
-                                entry.options,
-                                entry.min,
-                                entry.max,
-                                entry.step,
-                                this.normalizeRequires(entry.requiresExtension || entry.requiresExtensions || entry.requires)
-                            );
-                            if (typeof (entry as any).info === 'string') {
-                                (enriched as any).info = (entry as any).info;
-                            }
-                            defs.push(enriched);
-                        }
-                    }
-                    if (defs.length) {
-                        this.settingDefinitions = defs;
-                    }
-                }
-                if (Array.isArray(json?.keybindings)) {
-                    this.configKeybindings = json.keybindings as any[];
-                }
-                // Prefer explicit keybindingToggles if provided; else derive from keybindings list
-                if (Array.isArray(json?.keybindingToggles) && json.keybindingToggles.length) {
-                    this.keybindingToggles = (json.keybindingToggles as any[]).map(t => this.normalizeKeybindingToggle(t)).filter(Boolean) as KeybindingToggle[];
-                } else if (Array.isArray(json?.keybindings) && json.keybindings.length) {
-                    this.keybindingToggles = this.deriveKeybindingToggles(json.keybindings as any[]);
-                }
-            }
-        } catch {
-            // ignore and keep defaults
-        }
-    }
+		this.view.webview.onDidReceiveMessage(msg => this.handleMessage(msg));
 
-    private normalizeKeybindingToggle(input: any): KeybindingToggle | undefined {
-        if (!input || typeof input !== 'object') { return undefined; }
-        const key = String(input.key || input.id || input.keyId || input.keybinding?.command || input.command || '');
-        const title = String(input.title || input.name || input.keybinding?.title || input.command || key || 'Keybinding');
-        const description = String(input.description || input.keybinding?.command || input.command || title);
-        const kb = input.keybinding || { command: input.command, key: input.key || input.default, when: input.when };
-        if (!kb || !kb.command || !kb.key) { return undefined; }
-        const togg: KeybindingToggle = {
-            key,
-            title,
-            description,
-            keybinding: { command: String(kb.command), key: String(kb.key), when: kb.when ? String(kb.when) : undefined },
-            disables: Array.isArray(input.disables) ? input.disables.map((d: any) => ({ command: String(d.command), key: String(d.key), when: d.when ? String(d.when) : undefined })) : undefined
-        };
-        return togg;
-    }
+		// Load definitions (remote or bundled) and render.
+		await this.loadDefinitionsFromConfigSources();
+		// Kick off polling for remote config changes
+		this.startPollingRemoteConfig();
+		this.postState();
 
-    private deriveKeybindingToggles(items: Array<{ command: string; title?: string; default?: string; when?: string }>): KeybindingToggle[] {
-        const out: KeybindingToggle[] = [];
-        for (const it of items) {
-            if (!it?.command || !it?.default) { continue; }
-            out.push({
-                key: it.command,
-                title: it.title || it.command,
-                description: it.command,
-                keybinding: { command: it.command, key: it.default, when: it.when }
-            });
-        }
-        return out;
-    }
+		// Refresh when the view becomes visible again.
+		this.view.onDidChangeVisibility(() => { if (this.view?.visible) { this.postState(); } });
+	}
 
-    private normalizeRequires(input: any): string[] {
-        if (!input) { return []; }
-        if (typeof input === 'string') { return [input]; }
-        if (Array.isArray(input)) { return input.filter((s: any) => typeof s === 'string'); }
-        return [];
-    }
+	/** Start file / extension / configuration watchers used to refresh the UI. */
+	public startExternalWatchers() {
+		// Refresh when user configuration changes for any of our known keys.
+		this.disposables.push(vscode.workspace.onDidChangeConfiguration(e => {
+			const affected = this.settingDefinitions.some(def => e.affectsConfiguration(def.key));
+			if (affected) {
+				this.postState();
+			}
 
-    private mergeRequires(a: string[], b: string[]): string[] {
-        const set = new Set<string>();
-    for (const v of a) { set.add(v); }
-    for (const v of b) { set.add(v); }
-        return Array.from(set);
-    }
+			// If the remote-config URL changes, reload definitions.
+			if (e.affectsConfiguration && e.affectsConfiguration('beastMode.remoteConfigUrl')) {
+				void (async () => {
+					await this.loadDefinitionsFromConfigSources();
+					this.postState();
+				})();
+			}
+		}));
 
-    private inferDefinitionFromSchema(
-        key: string,
-        title?: string,
-        description?: string,
-        groupOverride?: string,
-        typeOverride?: SettingDefinition['type'],
-        optionsOverride?: Array<{ value: string; label?: string }>,
-        minOverride?: number,
-        maxOverride?: number,
-        stepOverride?: number,
-        requiresOverride?: string[]
-    ): SettingDefinition {
-        const found = this.findConfigSchemaForKey(key);
-        const schema = found?.schema;
-        const group = groupOverride || this.deriveGroupFromKey(key);
-        const label = title || key.split('.').slice(-1)[0];
-        let type: SettingDefinition['type'] = 'string';
-        let options: Array<{ value: string; label?: string }> | undefined;
-        let min: number | undefined;
-        let max: number | undefined;
-        let step: number | undefined;
-        let requires: string[] | undefined;
-        if (schema) {
-            const sType = Array.isArray(schema.type) ? schema.type[0] : schema.type;
-            if (sType === 'boolean') {
-                type = 'boolean';
-            } else if (sType === 'number' || sType === 'integer') {
-                type = 'number';
-                step = sType === 'integer' ? 1 : undefined;
-            } else if (sType === 'object' || sType === 'array') {
-                type = 'json';
-            } else {
-                type = 'string';
-            }
-            if (schema.enum && Array.isArray(schema.enum)) {
-                options = schema.enum.map((v: any, i: number) => ({ value: String(v), label: Array.isArray(schema.enumDescriptions) ? schema.enumDescriptions[i] : undefined }));
-            } else if (schema.oneOf || schema.anyOf) {
-                const alts = (schema.oneOf || schema.anyOf) as any[];
-                const enums = alts
-                    .filter(e => e?.const !== undefined || e?.enum)
-                    .map(e => e.const ?? (Array.isArray(e.enum) ? e.enum[0] : undefined))
-                    .filter((v: any) => v !== undefined);
-                if (enums && enums.length) {
-                    options = enums.map((v: any) => ({ value: String(v) }));
-                }
-            }
-            if (typeof schema.minimum === 'number') {
-                min = schema.minimum;
-            }
-            if (typeof schema.maximum === 'number') {
-                max = schema.maximum;
-            }
-            // If we could determine which extension contributes this schema and it's not our own, mark as requirement
-            if (found?.extensionId && found.extensionId !== this.context.extension.id) {
-                requires = [found.extensionId];
-            }
-        }
-        // Fallback: infer type from current/default value via configuration.inspect()
-        if (!schema || !type || type === 'string') {
-            try {
-                const info = this.getConfiguration().inspect<any>(key);
-                const sample = info?.globalValue ?? info?.workspaceValue ?? info?.workspaceFolderValue ?? info?.defaultValue;
-                if (sample !== undefined) {
-                    const t = typeof sample;
-                    if (t === 'boolean') {
-                        type = 'boolean';
-                    } else if (t === 'number') {
-                        type = 'number';
-                        if (Number.isInteger(sample) && step === undefined) {
-                            step = 1;
-                        }
-                    } else if (t === 'object' && sample !== null) {
-                        type = 'json';
-                    } else {
-                        type = 'string';
-                    }
-                }
-            } catch { /* ignore */ }
-        }
+		// Refresh when extensions are installed/uninstalled (schema availability may change).
+		this.disposables.push(vscode.extensions.onDidChange(() => this.postState()));
 
-        // Apply explicit overrides from config.json (highest precedence)
-        if (typeOverride) {
-            type = typeOverride;
-        }
-        if (optionsOverride && optionsOverride.length) {
-            options = optionsOverride.map(o => ({ value: String(o.value), label: o.label }));
-        }
-        if (minOverride !== undefined) { min = minOverride; }
-        if (maxOverride !== undefined) { max = maxOverride; }
-        if (stepOverride !== undefined) { step = stepOverride; }
-        if (requiresOverride && requiresOverride.length) {
-            requires = this.normalizeRequires(requiresOverride);
-        }
-        // No internal fallbacks: enums/options should come from config.json or schema only
-        return {
-            key,
-            type,
-            title: label,
-            description: description || label,
-            group,
-            min, max, step,
-            options,
-            requires
-        };
-    }
+		// Watch bundled config.json so local edits show up instantly during development.
+		const cfgPath = path.join(this.context.extensionPath, 'media', 'config.json');
+		if (fs.existsSync(cfgPath)) {
+			try {
+				const watcher = fs.watch(cfgPath, { persistent: false }, async () => {
+					await this.loadDefinitionsFromConfigSources();
+					this.postState();
+				});
+				this.disposables.push(new vscode.Disposable(() => watcher.close()));
+			} catch (e) {
+				// Fallback to fs.watchFile if fs.watch fails on some environments.
+				fs.watchFile(cfgPath, { interval: 1000 }, async () => {
+					await this.loadDefinitionsFromConfigSources();
+					this.postState();
+				});
+				this.disposables.push(new vscode.Disposable(() => fs.unwatchFile(cfgPath)));
+			}
+		}
+		// Ensure polling also starts when external watchers are started
+		this.startPollingRemoteConfig();
+	}
 
-    private findConfigSchemaForKey(key: string): { schema: any; extensionId?: string } | undefined {
-        for (const ext of vscode.extensions.all) {
-            const contrib = (ext.packageJSON?.contributes as any) || {};
-            const config = contrib.configuration;
-            if (!config) {
-                continue;
-            }
-            const buckets = Array.isArray(config) ? config : [config];
-            for (const bucket of buckets) {
-                const props = bucket?.properties;
-                if (props && Object.prototype.hasOwnProperty.call(props, key)) {
-                    return { schema: props[key], extensionId: ext.id };
-                }
-            }
-        }
-        return undefined;
-    }
+	/** Dispose watchers and cleanup. */
+	public dispose() {
+		for (const d of this.disposables.splice(0)) {
+			try { d.dispose(); } catch { /* ignore */ }
+		}
+		if (this.pollTimer) {
+			clearInterval(this.pollTimer);
+			this.pollTimer = undefined;
+		}
+	}
 
-    private deriveGroupFromKey(key: string): string {
-        const first = key.split('.')[0];
-    if (first === 'github') { return 'GitHub Copilot'; }
-    if (first === 'githubPullRequests') { return 'GitHub PRs'; }
-    if (first === 'terminal') { return 'Terminal'; }
-    if (first === 'workbench') { return 'Workbench'; }
-    if (first === 'editor') { return 'Editor'; }
-    if (first === 'chat') { return 'Chat'; }
-    if (first === 'git') { return 'Git'; }
-    if (first === 'window') { return 'Window'; }
-        return first.charAt(0).toUpperCase() + first.slice(1);
-    }
+	// -------------------------
+	// Messaging & state
+	// -------------------------
 
-    resolveWebviewView(webviewView: vscode.WebviewView): void | Thenable<void> {
-        this.view = webviewView;
-        webviewView.webview.options = {
-            enableScripts: true,
-            localResourceRoots: [vscode.Uri.file(path.join(this.context.extensionPath, 'media'))]
-        };
-        webviewView.webview.onDidReceiveMessage(msg => this.handleMessage(msg));
-    this.ensureLoadedFromConfig();
-        // Re-render when the view becomes visible again (keeps in sync with outside changes)
-        this.disposables.push(
-            webviewView.onDidChangeVisibility(() => {
-                if (webviewView.visible) {
-                    this.postState();
-                }
-            })
-        );
-        this.postState();
-    }
+	/** Handle messages from the webview (ready + setting updates). */
+	private async handleMessage(message: any) {
+		switch (message?.type) {
+			case 'ready':
+				this.postState();
+				break;
+			case 'refreshRemoteConfig':
+				// User requested to refresh and accept remote changes
+				await this.loadDefinitionsFromConfigSources();
+				// Clear pending flag
+				try { await this.context.globalState.update(this.GLOBAL_PENDING_KEY, false); } catch {}
+				try { await this.context.globalState.update(this.GLOBAL_LAST_RAW, null); } catch {}
+				this.postState();
+				break;
+			case 'checkRemoteNow':
+				// User requested an immediate check for remote updates (do not accept/apply automatically)
+				await this.checkRemoteNow();
+				break;
+			case 'updateSetting':
+				if (typeof message.key === 'string') {
+					await this.updateSetting(message.key, message.value);
+				}
+				break;
+			case 'installExtensions':
+				// Keep a minimal, resilient installer flow (UI may request a convenience install).
+				if (Array.isArray(message.ids) && message.ids.length) {
+					await this.installExtensions(message.ids);
+				}
+				break;
+			default:
+				// Unknown message types are ignored intentionally.
+				break;
+		}
+	}
 
-    /** Expose a safe refresh to re-render the webview */
-    public refresh() {
-        this.postState();
-    }
+	/** Gather current values for all definitions from the user's configuration. */
+	private collectCurrentSettings(): Record<string, any> {
+		const config = vscode.workspace.getConfiguration();
+		const out: Record<string, any> = {};
+		for (const def of this.settingDefinitions) {
+			out[def.key] = config.get(def.key);
+		}
+		return out;
+	}
 
-    private handleMessage(message: any) {
-        switch (message.type) {
-            case 'ready':
-                this.postState();
-                break;
-            case 'updateSetting':
-                this.updateSetting(message.key, message.value);
-                break;
-            case 'toggleKeybinding':
-                this.toggleKeybinding(message.key, message.enabled);
-                break;
-            case 'installExtensions':
-                this.installExtensions(Array.isArray(message.ids) ? message.ids : []);
-                break;
-        }
-    }
+	/** Build the state object and send it to the webview by replacing the HTML template. */
+	private postState() {
+		if (!this.view) { return; }
 
-    private getConfiguration() {
-        return vscode.workspace.getConfiguration();
-    }
+		const defsWithAvailability = this.settingDefinitions.map(d => {
+			const requires = Array.isArray(d.requires) ? d.requires : [];
+			const missing = requires.filter(id => !vscode.extensions.getExtension(id));
+			return { ...d, missingExtensions: missing } as SettingDefinition;
+		});
 
-    private postState() {
-            if (!this.view) {
-                return;
-            }
-        // Compute dependency availability per definition
-        const defsWithAvailability: SettingDefinition[] = this.settingDefinitions.map(d => {
-            const requires = Array.isArray(d.requires) ? d.requires : [];
-            const missing = requires.filter(id => !vscode.extensions.getExtension(id));
-            return { ...d, missingExtensions: missing };
-        });
-    const state: SettingsState = {
-            settings: this.collectCurrentSettings(),
-            definitions: defsWithAvailability,
-            groups: Array.from(new Set(defsWithAvailability.map(d => d.group))),
-            keybindings: this.collectKeybindings(),
-            keybindingToggles: this.collectKeybindingToggles()
-        };
-    this.view.webview.html = this.getHtml(state);
-    }
+		const pending = !!this.context.globalState.get<boolean>(this.GLOBAL_PENDING_KEY);
+		const lastChecked = this.context.globalState.get<string | null>(this.GLOBAL_LAST_CHECKED) || null;
+		// Inject a lightweight flag into the state so UI can show indicator
+		const state: SettingsState & { remotePending?: boolean } = {
+			settings: this.collectCurrentSettings(),
+			definitions: defsWithAvailability,
+			groups: Array.from(new Set(defsWithAvailability.map(d => d.group)))
+		} as any;
+		(state as any).remotePending = pending;
+		// Provide lastChecked timestamp (ISO) for UI display
+		if (lastChecked) { (state as any).remoteLastChecked = lastChecked; }
 
-    private collectCurrentSettings(): Record<string, any> {
-        const config = this.getConfiguration();
-        const out: Record<string, any> = {};
-        for (const def of this.settingDefinitions) {
-            out[def.key] = config.get(def.key);
-        }
-        return out;
-    }
+		this.view.webview.html = this.renderHtml(state);
+	}
 
-    private collectKeybindings(): KeybindingEntry[] {
-        // For now, return empty array since we're replacing with toggles
-        return [];
-    }
+	// -------------------------
+	// Remote config fetching
+	// -------------------------
 
-    private collectKeybindingToggles(): Array<KeybindingToggle & { enabled: boolean }> {
-        return this.keybindingToggles.map(toggle => ({
-            ...toggle,
-            enabled: this.isKeybindingToggleEnabled(toggle)
-        }));
-    }
+	/**
+	 * Load definitions from: remote url (beastMode.remoteConfigUrl) OR the bundled media/config.json
+	 * The loader understands grouped and single-entry formats and will enrich definitions via schema inference.
+	 */
+	private async loadDefinitionsFromConfigSources(): Promise<void> {
+		try {
+			const remoteUrl = (vscode.workspace.getConfiguration().get<string>('beastMode.remoteConfigUrl') || '').trim();
+			let json: any = null;
+			if (remoteUrl) {
+				json = await this.fetchAndCacheRemoteConfig(remoteUrl);
+			}
 
-    private isKeybindingToggleEnabled(toggle: KeybindingToggle): boolean {
-        const arr = this.readUserKeybindingsArray();
-        if (!arr) { return false; }
-        const hasMainBinding = arr.some((entry: any) =>
-            entry?.command === toggle.keybinding.command &&
-            entry?.key === toggle.keybinding.key
-        );
-        if (!hasMainBinding) { return false; }
-        if (toggle.disables && toggle.disables.length) {
-            const hasAllDisables = toggle.disables.every(disable =>
-                arr.some((entry: any) => entry?.command === `-${disable.command}` && entry?.key === disable.key)
-            );
-            return hasAllDisables;
-        }
-        return true;
-    }
+			if (!json) {
+				// Fallback to bundled config
+				const cfgPath = path.join(this.context.extensionPath, 'media', 'config.json');
+				if (fs.existsSync(cfgPath)) {
+					const raw = fs.readFileSync(cfgPath, 'utf8');
+					try { json = JSON.parse(raw); } catch { json = null; }
+				}
+			}
 
-    private async toggleKeybinding(toggleKey: string, enabled: boolean) {
-        const toggle = this.keybindingToggles.find(t => t.key === toggleKey);
-        if (!toggle) {
-            vscode.window.showErrorMessage(`Unknown keybinding toggle: ${toggleKey}`);
-            return;
-        }
-        const ok = await this.openAndMutateKeybindingsFile((arr) => {
-            let out = Array.isArray(arr) ? arr.slice() : [];
-            const disableCommands = new Set<string>((toggle.disables || []).map(d => `-${d.command}`));
-            if (enabled) {
-                // Remove ALL existing entries for this command (any key/when/args)
-                out = out.filter(e => e?.command !== toggle.keybinding.command);
-                // Also remove ALL existing unbindings for listed disables (any key)
-                if (disableCommands.size) {
-                    out = out.filter(e => !(typeof e?.command === 'string' && disableCommands.has(e.command)));
-                }
-                // Add the main keybinding
-                const newBinding: any = { key: toggle.keybinding.key, command: toggle.keybinding.command };
-                if (toggle.keybinding.when) { newBinding.when = toggle.keybinding.when; }
-                out.push(newBinding);
-                // Add unbindings for disables
-                if (toggle.disables) {
-                    for (const d of toggle.disables) {
-                        out.push({ key: d.key, command: `-${d.command}` });
-                    }
-                }
-            } else {
-                // Remove ALL entries for this command and ALL unbindings for listed disables
-                out = out.filter(e => {
-                    if (e?.command === toggle.keybinding.command) { return false; }
-                    if (typeof e?.command === 'string' && disableCommands.has(e.command)) { return false; }
-                    return true;
-                });
-            }
-            return out;
-        });
-        if (!ok) {
-            vscode.window.showErrorMessage('Unable to update keybindings. Opening Keyboard Shortcuts (JSON)…');
-            await vscode.commands.executeCommand('workbench.action.openGlobalKeybindingsFile');
-        }
-        this.postState();
-    }
+			// Normalize incoming JSON into SettingDefinition[] using schema inference.
+			const defs: SettingDefinition[] = [];
+			if (json && Array.isArray(json.settings)) {
+				for (const entry of json.settings) {
+					if (!entry) { continue; }
+					// Grouped form: { group, settings: [...] }
+					if (typeof entry.group === 'string' && Array.isArray(entry.settings)) {
+						const groupName = entry.group;
+						const groupRequires = this.normalizeRequires(entry.requires || entry.requiresExtensions || entry.requiresExtension);
+						for (const s of entry.settings) {
+							if (!s || typeof s.key !== 'string') { continue; }
+							const enriched = this.inferDefinitionFromSchema(
+								s.key,
+								s.title,
+								s.description,
+								groupName,
+								s.type,
+								s.options,
+								s.min,
+								s.max,
+								s.step,
+								this.mergeRequires(groupRequires, this.normalizeRequires(s.requires || s.requiresExtensions || s.requiresExtension))
+							);
+							if (typeof s.info === 'string') { enriched.info = s.info; }
+							defs.push(enriched);
+						}
+						continue;
+					}
 
-    // Legacy path (unused in package.json mode) - kept for reference or future fallback
-    private readUserKeybindingsArray(): any[] | undefined {
-        // Prefer the exact user keybindings.json for the current profile, not the default/read-only doc
-        const profileKb = this.getUserKeybindingsPath();
-        if (profileKb) {
-            const matchOpenDoc = vscode.workspace.textDocuments.find(d => {
-                try {
-                    // Compare fsPath exactly (case-insensitive on Windows)
-                    const a = (d.uri.fsPath || d.fileName);
-                    if (!a) { return false; }
-                    return process.platform === 'win32'
-                        ? a.toLowerCase() === profileKb.toLowerCase()
-                        : a === profileKb;
-                } catch { return false; }
-            });
-            if (matchOpenDoc) {
-                try {
-                    const parsed = parseJsonc(matchOpenDoc.getText());
-                    if (Array.isArray(parsed)) { return parsed; }
-                } catch { /* ignore */ }
-            }
-            // Fallback to file-system read
-            if (fs.existsSync(profileKb)) {
-                try {
-                    const raw = fs.readFileSync(profileKb, 'utf8');
-                    const arr = parseJsonc(raw);
-                    if (Array.isArray(arr)) { return arr; }
-                } catch { /* ignore */ }
-            }
-        }
-        return undefined;
-    }
+					// Single entry form: { key, ... }
+					if (typeof entry.key === 'string') {
+						const enriched = this.inferDefinitionFromSchema(
+							entry.key,
+							entry.title,
+							entry.description,
+							entry.group,
+							entry.type,
+							entry.options,
+							entry.min,
+							entry.max,
+							entry.step,
+							this.normalizeRequires(entry.requires || entry.requiresExtensions || entry.requiresExtension)
+						);
+						if (typeof (entry as any).info === 'string') { enriched.info = (entry as any).info; }
+						defs.push(enriched);
+					}
+				}
+			}
 
-    // removed package.json mutation helpers (not reliable for runtime toggling)
+			if (defs.length) { 
+				this.settingDefinitions = defs;
+				// Apply defaults for any newly discovered settings (without overwriting user-set values)
+				try { await this.applyDefaultsToUserSettings(defs); } catch { /* ignore */ }
+			}
+		} catch {
+			// Fail silently — degrade gracefully to existing definitions (if any).
+		}
+	}
 
-    private async openAndMutateKeybindingsFile(mutator: (arr: any[]) => any[]): Promise<boolean> {
-        try {
-            await vscode.commands.executeCommand('workbench.action.openGlobalKeybindingsFile');
-        } catch { /* ignore */ }
+	/** Start a periodic poller that checks the remote config raw text for changes. */
+	private startPollingRemoteConfig() {
+		if (this.pollTimer) { return; }
 
-        // Wait briefly for the editor to open
-        let kbDoc: vscode.TextDocument | undefined;
-        const profileKb = this.getUserKeybindingsPath();
-        for (let i = 0; i < 15; i++) {
-            const active = vscode.window.activeTextEditor?.document;
-            if (active && this.isUserKeybindingsDocument(active)) {
-                kbDoc = active;
-                break;
-            }
-            const found = vscode.workspace.textDocuments.find(d => this.isUserKeybindingsDocument(d));
-            if (found) { kbDoc = found; break; }
-            await new Promise(res => setTimeout(res, 100));
-        }
-        // Fallback: explicitly open the file-based user keybindings
-        if (!kbDoc && profileKb) {
-            try {
-                const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(profileKb));
-                await vscode.window.showTextDocument(doc, { preview: false });
-                kbDoc = doc;
-            } catch { /* ignore */ }
-        }
-        if (!kbDoc) { return false; }
+		const doCheck = async () => {
+			try {
+				const remoteUrl = (vscode.workspace.getConfiguration().get<string>('beastMode.remoteConfigUrl') || '').trim();
+				if (!remoteUrl) { return; }
+				const effective = (await this.resolveToRawUrl(remoteUrl)) || remoteUrl;
+				let rawText: string | null = null;
+				if (effective.startsWith('gist:')) {
+					const gistId = effective.substring(5);
+					rawText = await this.fetchGistContent(gistId);
+				} else if (/^https?:\/\//i.test(effective)) {
+					try {
+						const urlObj = new URL(effective);
+						rawText = await new Promise<string>((resolve, reject) => {
+							const req = https.request({ hostname: urlObj.hostname, path: urlObj.pathname + (urlObj.search || ''), method: 'GET', headers: { 'User-Agent': 'beast-mode-ext', 'Accept': 'application/json' }, port: urlObj.port ? Number(urlObj.port) : 443, timeout: 9000 }, res => {
+								if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) { return reject(new Error(`HTTP ${res.statusCode}`)); }
+								const chunks: Buffer[] = [];
+								res.on('data', c => chunks.push(Buffer.from(c)));
+								res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+							});
+							req.on('error', reject);
+							req.on('timeout', () => req.destroy(new Error('timeout')));
+							req.end();
+						});
+					} catch {
+						rawText = null;
+					}
+				}
 
-        let curArr: any[] = [];
-        try {
-            const parsed = parseJsonc(kbDoc.getText());
-            if (Array.isArray(parsed)) { curArr = parsed; }
-        } catch { /* ignore */ }
+				if (!rawText) { return; }
 
-        const newArr = mutator(curArr);
-        const newText = JSON.stringify(newArr, null, 2);
-        if (kbDoc.getText() === newText) { return true; }
+				const last = this.context.globalState.get<string>(this.GLOBAL_LAST_RAW);
+				// Record when we performed this remote check
+				try { await this.context.globalState.update(this.GLOBAL_LAST_CHECKED, new Date().toISOString()); } catch {}
+				if (!last) {
+					await this.context.globalState.update(this.GLOBAL_LAST_RAW, rawText);
+					await this.context.globalState.update(this.GLOBAL_PENDING_KEY, false);
+					return;
+				}
 
-        const edit = new vscode.WorkspaceEdit();
-        const fullRange = new vscode.Range(0, 0, kbDoc.lineCount, kbDoc.lineAt(Math.max(0, kbDoc.lineCount - 1)).text.length);
-        edit.replace(kbDoc.uri, fullRange, newText);
-        const applied = await vscode.workspace.applyEdit(edit);
-        if (!applied) { return false; }
-        try { await kbDoc.save(); } catch { /* ignore */ }
-        return true;
-    }
+				if (last !== rawText) {
+					await this.context.globalState.update(this.GLOBAL_PENDING_KEY, true);
+					this.postState();
+				}
+			} catch (e) {
+				// ignore
+			}
+		};
 
-    /** Detect if a TextDocument corresponds to the current profile's user keybindings.json */
-    private isUserKeybindingsDocument(doc: vscode.TextDocument): boolean {
-        try {
-            const profileKb = this.getUserKeybindingsPath();
-            const fsPath = doc.uri.fsPath || doc.fileName || '';
-            if (profileKb) {
-                const a = process.platform === 'win32' ? (fsPath.toLowerCase()) : fsPath;
-                const b = process.platform === 'win32' ? (profileKb.toLowerCase()) : profileKb;
-                if (a === b) { return true; }
-            }
-            // Accept vscode-userdata URI that represents the user keybindings.json
-            if (doc.uri.scheme === 'vscode-userdata') {
-                const p = (doc.uri.path || '').toLowerCase();
-                // Typical path: /User/keybindings.json or /User/profiles/<id>/keybindings.json
-                if (/\/user\//.test(p) && p.endsWith('keybindings.json')) {
-                    return true;
-                }
-            }
-        } catch { /* ignore */ }
-        return false;
-    }
+		// Run immediately then schedule interval
+		void doCheck();
+		this.pollTimer = setInterval(() => void doCheck(), this.POLL_INTERVAL_MS);
+		this.disposables.push(new vscode.Disposable(() => { if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = undefined; } }));
+	}
 
-    private getUserSettingsRootDir(): string | undefined {
-        // Prefer VS Code's current profile settings directory if available
-        const appSettingsPath = (vscode.env as any)?.appSettingsPath as string | undefined;
-        
-        if (appSettingsPath && typeof appSettingsPath === 'string' && appSettingsPath.length > 0) {
-            return appSettingsPath; // e.g., ~/.config/Code - Insiders/User/profiles/<id>
-        }
-        // Fallback: derive config directory name based on app variant
-        const display = (vscode.env as any)?.appName || '';
-        let appName = 'Code';
-        const lower = display.toLowerCase();
-        if (lower.includes('insiders')) {
-            appName = 'Code - Insiders';
-        } else if (lower.includes('oss')) {
-            appName = 'Code - OSS';
-        } else if (lower.includes('codium')) {
-            appName = 'VSCodium';
-        } else {
-            appName = 'Code';
-        }
-        const home = process.env.HOME || process.env.USERPROFILE;
-        if (!home) {
-            return undefined;
-        }
-        const fallbackPath = process.platform === 'win32' 
-            ? path.join(home, 'AppData', 'Roaming', appName, 'User')
-            : process.platform === 'darwin' 
-            ? path.join(home, 'Library', 'Application Support', appName, 'User')
-            : path.join(home, '.config', appName, 'User');
-        return fallbackPath;
-    }
+	/** Perform an immediate remote config check and mark pending if different from last known raw. */
+	private async checkRemoteNow(): Promise<void> {
+		try {
+			const remoteUrl = (vscode.workspace.getConfiguration().get<string>('beastMode.remoteConfigUrl') || '').trim();
+			if (!remoteUrl) {
+				try { await this.context.globalState.update(this.GLOBAL_PENDING_KEY, false); } catch {}
+				this.postState();
+				return;
+			}
 
-    private getUserKeybindingsPath(): string | undefined {
-        const root = this.getUserSettingsRootDir();
-        return root ? path.join(root, 'keybindings.json') : undefined;
-    }
+			const effective = (await this.resolveToRawUrl(remoteUrl)) || remoteUrl;
+			let rawText: string | null = null;
+			if (effective.startsWith('gist:')) {
+				const gistId = effective.substring(5);
+				rawText = await this.fetchGistContent(gistId);
+			} else if (/^https?:\/\//i.test(effective)) {
+				try {
+					const urlObj = new URL(effective);
+					rawText = await new Promise<string>((resolve, reject) => {
+						const req = https.request({ hostname: urlObj.hostname, path: urlObj.pathname + (urlObj.search || ''), method: 'GET', headers: { 'User-Agent': 'beast-mode-ext', 'Accept': 'application/json' }, port: urlObj.port ? Number(urlObj.port) : 443, timeout: 9000 }, res => {
+							if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) { return reject(new Error(`HTTP ${res.statusCode}`)); }
+							const chunks: Buffer[] = [];
+							res.on('data', c => chunks.push(Buffer.from(c)));
+							res.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
+						});
+						req.on('error', reject);
+						req.on('timeout', () => req.destroy(new Error('timeout')));
+						req.end();
+					});
+				} catch {
+					rawText = null;
+				}
+			}
 
-    /** Begin watching external sources that can affect our state (config, keybindings, config.json) */
-    public startExternalWatchers() {
-        // 1) Configuration changes: only refresh if relevant settings changed
-        this.disposables.push(
-            vscode.workspace.onDidChangeConfiguration(e => {
-                // If any tracked setting key is affected, refresh
-                const affected = this.settingDefinitions.some(def => e.affectsConfiguration(def.key));
-                if (affected) {
-                    this.postState();
-                }
-            })
-        );
+			if (!rawText) { this.postState(); return; }
 
-        // 1b) Extensions installed/removed/changed
-        this.disposables.push(
-            vscode.extensions.onDidChange(() => this.postState())
-        );
+			// Record check timestamp
+			try { await this.context.globalState.update(this.GLOBAL_LAST_CHECKED, new Date().toISOString()); } catch {}
+			const last = this.context.globalState.get<string>(this.GLOBAL_LAST_RAW);
+			if (!last) {
+				await this.context.globalState.update(this.GLOBAL_LAST_RAW, rawText);
+				await this.context.globalState.update(this.GLOBAL_PENDING_KEY, false);
+				this.postState();
+				return;
+			}
 
-        // 2) User keybindings.json changes - watch for changes to update toggle states
-        const profileKb = this.getUserKeybindingsPath();
-        if (profileKb) {
-            const kbDir = path.dirname(profileKb);
-            // Watch the file if it exists
-            if (fs.existsSync(profileKb)) {
-                try {
-                    const watcher = fs.watch(profileKb, { persistent: false }, () => {
-                        setTimeout(() => this.postState(), 50);
-                    });
-                    this.disposables.push(new vscode.Disposable(() => watcher.close()));
-                } catch {
-                    fs.watchFile(profileKb, { interval: 1000 }, () => this.postState());
-                    this.disposables.push(new vscode.Disposable(() => fs.unwatchFile(profileKb)));
-                }
-            }
-            // Also watch the parent directory for create/rename of keybindings.json
-            if (fs.existsSync(kbDir)) {
-                try {
-                    const dirWatcher = fs.watch(kbDir, { persistent: false }, (eventType, filename) => {
-                        if (typeof filename === 'string' && filename.toLowerCase() === 'keybindings.json') {
-                            setTimeout(() => this.postState(), 50);
-                        }
-                    });
-                    this.disposables.push(new vscode.Disposable(() => dirWatcher.close()));
-                } catch { /* ignore */ }
-            }
-        }
+			if (last !== rawText) {
+				await this.context.globalState.update(this.GLOBAL_PENDING_KEY, true);
+				this.postState();
+				return;
+			}
 
-        // 3) Our own media/config.json (setting definitions / kb list) changes
-        const cfgPath = path.join(this.context.extensionPath, 'media', 'config.json');
-        if (fs.existsSync(cfgPath)) {
-            try {
-                const watcher = fs.watch(cfgPath, { persistent: false }, () => {
-                    // Reload definitions and re-render
-                    this.ensureLoadedFromConfig();
-                    this.postState();
-                });
-                this.disposables.push(new vscode.Disposable(() => watcher.close()));
-            } catch {
-                fs.watchFile(cfgPath, { interval: 1000 }, () => {
-                    this.ensureLoadedFromConfig();
-                    this.postState();
-                });
-                this.disposables.push(new vscode.Disposable(() => fs.unwatchFile(cfgPath)));
-            }
-        }
-    }
+			await this.context.globalState.update(this.GLOBAL_PENDING_KEY, false);
+			this.postState();
+		} catch {
+			this.postState();
+		}
+	}
 
-    public dispose() {
-        for (const d of this.disposables.splice(0)) {
-            try { d.dispose(); } catch { /* ignore */ }
-        }
-    }
+	/** Resolve a URL string into a raw JSON URL or a special gist:ID marker. */
+	private async resolveToRawUrl(remoteUrl: string): Promise<string | null> {
+		if (!remoteUrl) { return null; }
+		const gistMatch = remoteUrl.match(/gist.github(?:usercontent)?\.com\/(?:[^\/]+\/)?([0-9a-fA-F]{6,})/i);
+		if (gistMatch && gistMatch[1]) { return `gist:${gistMatch[1]}`; }
+		// Keep query but strip hash
+		return remoteUrl.split('#')[0];
+	}
 
-    private async updateSetting(key: string, value: any) {
-        await this.getConfiguration().update(key, value, vscode.ConfigurationTarget.Global);
-        this.postState();
-    }
+	/** Fetch remote JSON and cache to global storage + local file. Supports gist.github.com via API. */
+	private async fetchAndCacheRemoteConfig(remoteUrl: string): Promise<any | null> {
+		try {
+			if (!/^https?:\/\//i.test(remoteUrl)) { return null; }
+			const effective = (await this.resolveToRawUrl(remoteUrl)) || remoteUrl;
 
-    private async installExtensions(ids: string[]) {
-        if (!ids || !ids.length) { return; }
-        for (const id of ids) {
-            try {
-                await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
-            } catch (e) {
-                // Fallback: open extensions view with @id query
-                await vscode.commands.executeCommand('workbench.extensions.search', `@id:${id}`);
-                vscode.window.showWarningMessage(`Failed to install ${id} automatically. Opened Extensions view instead.`);
-            }
-        }
-        // After install attempt, refresh UI
-        this.postState();
-    }
+			if (effective.startsWith('gist:')) {
+				const gistId = effective.substring(5);
+				const gistContent = await this.fetchGistContent(gistId);
+				if (!gistContent) { return null; }
+				try { return JSON.parse(gistContent); } catch { return null; }
+			}
 
-    private getHtml(state: SettingsState): string {
-        const nonce = this.getNonce();
-        const csp = [
-            `default-src 'none'`,
-            `style-src ${this.getWebviewCspSource()} 'unsafe-inline'`,
-            `script-src 'nonce-${nonce}'`
-        ].join('; ');
-        const templatePath = path.join(this.context.extensionPath, 'media', 'settingsWebview.html');
-        let html: string;
-        try {
-            html = fs.readFileSync(templatePath, 'utf8');
-        } catch (e) {
-            return `<html><body><h3>Failed to load settings template.</h3><pre>${(e as any)?.message || e}</pre></body></html>`;
-        }
-        return html
-            .replace(/%%CSP%%/g, csp)
-            .replace(/%%NONCE%%/g, nonce)
-            .replace(/%%STATE_JSON%%/g, () => JSON.stringify(state));
-    }
+			// Standard URL fetching with caching via ETag
+			const cacheDir = this.context.globalStorageUri?.fsPath || path.join(this.context.extensionPath, 'media');
+			try { fs.mkdirSync(cacheDir, { recursive: true }); } catch {}
+			const cacheFile = path.join(cacheDir, 'remote-config.json');
+			const etagKey = `remoteConfig.etag:${effective}`;
+			const headers: Record<string, string> = { 'User-Agent': 'beast-mode-ext', 'Accept': 'application/json' };
+			const prevEtag = this.context.globalState.get<string>(etagKey);
+			if (prevEtag) { headers['If-None-Match'] = prevEtag; }
 
-    private getWebviewCspSource() {
-        return this.view?.webview.cspSource || 'vscode-resource:';
-    }
+			const urlObj = new URL(effective);
+			const body = await new Promise<{ text: string; etag?: string }>((resolve, reject) => {
+				const req = https.request({ hostname: urlObj.hostname, path: urlObj.pathname + (urlObj.search || ''), method: 'GET', headers, port: urlObj.port ? Number(urlObj.port) : 443, timeout: 9000 }, res => {
+					if (res.statusCode === 304) {
+						try {
+							const cached = fs.readFileSync(cacheFile, 'utf8');
+							return resolve({ text: cached, etag: res.headers['etag'] as string | undefined });
+						} catch { return reject(new Error('cached-missing')); }
+					}
+					if (!res.statusCode || res.statusCode < 200 || res.statusCode >= 300) { return reject(new Error(`HTTP ${res.statusCode}`)); }
+					const chunks: Buffer[] = [];
+					res.on('data', c => chunks.push(Buffer.from(c)));
+					res.on('end', () => resolve({ text: Buffer.concat(chunks).toString('utf8'), etag: res.headers['etag'] as string | undefined }));
+				});
+				req.on('timeout', () => req.destroy(new Error('timeout')));
+				req.on('error', reject);
+				req.end();
+			});
 
-    private getNonce() {
-        let text = '';
-        const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        for (let i = 0; i < 32; i++) {
-            text += possible.charAt(Math.floor(Math.random() * possible.length));
-        }
-        return text;
-    }
+			if (!body || !body.text) { return null; }
+			try {
+				const parsed = JSON.parse(body.text);
+				try { fs.writeFileSync(cacheFile, JSON.stringify(parsed, null, 2), 'utf8'); } catch {}
+				if (body.etag) { try { await this.context.globalState.update(etagKey, body.etag); } catch {} }
+				return parsed;
+			} catch {
+				// If parsing remote response fails, try to fallback to local cached file
+				try { const raw = fs.readFileSync(cacheFile, 'utf8'); return JSON.parse(raw); } catch { return null; }
+			}
+		} catch {
+			return null;
+		}
+	}
+
+	/** Fetch gist JSON by using GitHub's Gist API and return the first JSON file content if present. */
+	private async fetchGistContent(gistId: string): Promise<string | null> {
+		try {
+			const apiUrl = `https://api.github.com/gists/${gistId}`;
+			const cacheKey = `gist.etag:${gistId}`;
+			const prevEtag = this.context.globalState.get<string>(cacheKey);
+			const headers: Record<string, string> = { 'User-Agent': 'beast-mode-ext', 'Accept': 'application/vnd.github.v3+json' };
+			if (prevEtag) { headers['If-None-Match'] = prevEtag; }
+
+			const response = await new Promise<{ body: string; headers: any; status: number }>((resolve, reject) => {
+				const req = https.request(apiUrl, { method: 'GET', headers, timeout: 9000 }, res => {
+					const chunks: Buffer[] = [];
+					res.on('data', c => chunks.push(Buffer.from(c)));
+					res.on('end', () => resolve({ body: Buffer.concat(chunks).toString('utf8'), headers: res.headers, status: res.statusCode || 500 }));
+				});
+				req.on('error', reject);
+				req.on('timeout', () => req.destroy(new Error('timeout')));
+				req.end();
+			});
+
+			if (response.status === 304) {
+				// Use previously cached file if present
+				const cacheDir = this.context.globalStorageUri?.fsPath || path.join(this.context.extensionPath, 'media');
+				const cacheFile = path.join(cacheDir, `gist-${gistId}.json`);
+				try { return fs.readFileSync(cacheFile, 'utf8'); } catch { return null; }
+			}
+
+			if (response.status < 200 || response.status >= 300) { return null; }
+			const parsed = JSON.parse(response.body);
+			const files = parsed?.files || {};
+			let targetFile = files['config.json'];
+			if (!targetFile) {
+				const jsonFiles = Object.keys(files).filter(n => n.endsWith('.json'));
+				if (jsonFiles.length) { targetFile = files[jsonFiles[0]]; }
+			}
+			if (!targetFile || !targetFile.content) { return null; }
+
+			// Cache content + etag
+			if (response.headers?.etag) {
+				await this.context.globalState.update(cacheKey, response.headers.etag as string);
+				const cacheDir = this.context.globalStorageUri?.fsPath || path.join(this.context.extensionPath, 'media');
+				try { fs.mkdirSync(cacheDir, { recursive: true }); fs.writeFileSync(path.join(cacheDir, `gist-${gistId}.json`), targetFile.content, 'utf8'); } catch {}
+			}
+
+			return targetFile.content;
+		} catch {
+			return null;
+		}
+	}
+
+	// -------------------------
+	// Schema enrichment helpers
+	// -------------------------
+
+	/** Normalize 'requires' value into string[] */
+	private normalizeRequires(input: any): string[] {
+		if (!input) { return []; }
+		if (typeof input === 'string') { return [input]; }
+		if (Array.isArray(input)) { return input.filter(i => typeof i === 'string'); }
+		return [];
+	}
+
+	/** Merge two requires arrays into a unique array. */
+	private mergeRequires(a: string[], b: string[]): string[] {
+		return Array.from(new Set([...(a || []), ...(b || [])]));
+	}
+
+	/**
+	 * Infer a SettingDefinition for a key by inspecting installed extension configurations and current user values.
+	 */
+	private inferDefinitionFromSchema(
+		key: string,
+		title?: string,
+		description?: string,
+		groupOverride?: string,
+		typeOverride?: SettingDefinition['type'],
+		optionsOverride?: Array<{ value: string; label?: string }>,
+		minOverride?: number,
+		maxOverride?: number,
+		stepOverride?: number,
+		requiresOverride?: string[],
+		defaultOverride?: any
+	): SettingDefinition {
+		// Try to find a contributed JSON schema for this key across installed extensions.
+		const found = this.findConfigSchemaForKey(key);
+		const schema = found?.schema;
+		const group = groupOverride || this.deriveGroupFromKey(key);
+		const label = title || key.split('.').slice(-1)[0];
+
+		let type: SettingDefinition['type'] = 'string';
+		let options: Array<{ value: string; label?: string }> | undefined = undefined;
+		let min: number | undefined = undefined;
+		let max: number | undefined = undefined;
+		let step: number | undefined = undefined;
+		let requires: string[] | undefined = undefined;
+		let defaultVal: any = defaultOverride;
+
+		if (schema) {
+			const sType = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+			if (sType === 'boolean') { type = 'boolean'; }
+			else if (sType === 'number' || sType === 'integer') { type = 'number'; step = sType === 'integer' ? 1 : undefined; }
+			else if (sType === 'object' || sType === 'array') { type = 'json'; }
+			else { type = 'string'; }
+
+			if (schema.enum && Array.isArray(schema.enum)) {
+				options = schema.enum.map((v: any, i: number) => ({ value: String(v), label: Array.isArray(schema.enumDescriptions) ? schema.enumDescriptions[i] : undefined }));
+			} else if (schema.oneOf || schema.anyOf) {
+				const alts = (schema.oneOf || schema.anyOf) as any[];
+				const enums = alts
+					.filter(e => e && (e.const !== undefined || e.enum))
+					.map(e => e.const ?? (Array.isArray(e.enum) ? e.enum[0] : undefined))
+					.filter(v => v !== undefined);
+				if (enums.length) { options = enums.map(v => ({ value: String(v) })); }
+			}
+
+			if (typeof schema.minimum === 'number') { min = schema.minimum; }
+			if (typeof schema.maximum === 'number') { max = schema.maximum; }
+			if (found && found.extensionId && found.extensionId !== this.context.extension.id) { requires = [found.extensionId]; }
+
+			// If the schema provides a default, prefer that unless an explicit override was provided.
+			if (defaultVal === undefined && schema.default !== undefined) { defaultVal = schema.default; }
+		}
+
+		// Inspect current configuration values to refine type information.
+		try {
+			const info = vscode.workspace.getConfiguration().inspect<any>(key);
+			const sample = info?.globalValue ?? info?.workspaceValue ?? info?.workspaceFolderValue ?? info?.defaultValue;
+			if (sample !== undefined) {
+				const t = typeof sample;
+				if (t === 'boolean') { type = 'boolean'; }
+				else if (t === 'number') { type = 'number'; if (Number.isInteger(sample) && step === undefined) { step = 1; } }
+				else if (t === 'object' && sample !== null) { type = 'json'; }
+				else { type = 'string'; }
+				// If a concrete default exists in the configuration defaultValue and we haven't picked one, use it as a fallback.
+				if (defaultVal === undefined && info?.defaultValue !== undefined) { defaultVal = info.defaultValue; }
+			}
+		} catch {
+			// Ignore failures inspecting configuration
+		}
+
+		// Apply overrides provided by the remote config metadata.
+		if (typeOverride) { type = typeOverride; }
+		if (optionsOverride && optionsOverride.length) { options = optionsOverride.map(o => ({ value: String(o.value), label: o.label })); }
+		if (minOverride !== undefined) { min = minOverride; }
+		if (maxOverride !== undefined) { max = maxOverride; }
+		if (stepOverride !== undefined) { step = stepOverride; }
+		if (requiresOverride && requiresOverride.length) { requires = this.normalizeRequires(requiresOverride); }
+		if (defaultOverride !== undefined) { defaultVal = defaultOverride; }
+
+		return { key, type, title: label, description: description || label, group, min, max, step, options, requires, default: defaultVal };
+	}
+
+	/** Search all installed extensions for a configuration schema that defines `key`. */
+	private findConfigSchemaForKey(key: string): { schema: any; extensionId?: string } | undefined {
+		for (const ext of vscode.extensions.all) {
+			const contrib = (ext.packageJSON && (ext.packageJSON as any).contributes) || {};
+			const config = (contrib as any).configuration;
+			if (!config) { continue; }
+			const buckets = Array.isArray(config) ? config : [config];
+			for (const bucket of buckets) {
+				const props = (bucket as any).properties;
+				if (props && Object.prototype.hasOwnProperty.call(props, key)) {
+					return { schema: props[key], extensionId: ext.id };
+				}
+			}
+		}
+		return undefined;
+	}
+
+	/** Derive a friendly group name from a dotted setting key. */
+	private deriveGroupFromKey(key: string): string {
+		const first = key.split('.')[0] || key;
+		switch (first) {
+			case 'github': return 'GitHub Copilot';
+			case 'githubPullRequests': return 'GitHub PRs';
+			case 'terminal': return 'Terminal';
+			case 'workbench': return 'Workbench';
+			case 'editor': return 'Editor';
+			case 'chat': return 'Chat';
+			case 'git': return 'Git';
+			case 'window': return 'Window';
+			default: return first.charAt(0).toUpperCase() + first.slice(1);
+		}
+	}
+
+	// -------------------------
+	// Apply changes / helpers
+	// -------------------------
+
+	/** Update a user's setting at the global (user) scope and refresh the view. */
+	private async updateSetting(key: string, value: any) {
+		await vscode.workspace.getConfiguration().update(key, value, vscode.ConfigurationTarget.Global);
+		this.postState();
+	}
+
+	/**
+	 * Apply suggested defaults for newly discovered settings but only when the user has not explicitly
+	 * configured the setting at any scope. Do not overwrite any existing user values.
+	 */
+	private async applyDefaultsToUserSettings(defs: SettingDefinition[]): Promise<void> {
+		for (const def of defs) {
+			try {
+				// If the setting requires extensions that are not installed, skip applying default.
+				if (def.requires && def.requires.length) {
+					const anyMissing = def.requires.some(r => !vscode.extensions.getExtension(r));
+					if (anyMissing) { continue; }
+				}
+
+				const info = vscode.workspace.getConfiguration().inspect<any>(def.key);
+				// If the user has explicitly set the value at any scope, respect that and do nothing.
+				if (info?.globalValue !== undefined || info?.workspaceValue !== undefined || info?.workspaceFolderValue !== undefined) {
+					continue;
+				}
+
+				let valueToSet: any = undefined;
+				if (def.default !== undefined) {
+					valueToSet = def.default;
+				} else if (def.type === 'boolean') {
+					// "Always on" behavior: default booleans are enabled unless the user has chosen otherwise.
+					valueToSet = true;
+				} else if (def.type === 'number') {
+					valueToSet = def.min !== undefined ? def.min : 1;
+				} else if (def.type === 'string' && def.options && def.options.length) {
+					valueToSet = def.options[0].value;
+				}
+
+				if (valueToSet !== undefined) {
+					await vscode.workspace.getConfiguration().update(def.key, valueToSet, vscode.ConfigurationTarget.Global);
+				}
+			} catch {
+				// Swallow any errors to avoid disrupting refresh flow.
+			}
+		}
+	}
+
+	/** Attempt to install extensions by id. If automatic install fails we open the Extensions view search. */
+	private async installExtensions(ids: string[]) {
+		const installPromises: Thenable<unknown>[] = [];
+		for (const id of ids) {
+			try {
+				const existing = vscode.extensions.getExtension(id);
+				if (existing) {
+					// Already installed
+					continue;
+				}
+
+				// Attempt a direct install
+				const promise = vscode.commands.executeCommand('workbench.extensions.installExtension', id);
+				installPromises.push(promise);
+			} catch {
+				// Ignore install errors, we can prompt user to install manually if needed.
+			}
+		}
+
+		// If we have any install promises, wait for them to complete.
+		if (installPromises.length) {
+			try { await Promise.all(installPromises as any); } catch { /* ignore */ }
+		}
+	}
+
+	// -------------------------
+	// HTML rendering / CSP
+	// -------------------------
+
+	/** Load the HTML template and inject the state JSON + CSP nonce. */
+	private renderHtml(state: SettingsState): string {
+		const nonce = this.generateNonce();
+		const csp = [`default-src 'none'`, `style-src ${this.getCspSource()} 'unsafe-inline'`, `script-src 'nonce-${nonce}'`].join('; ');
+		const templatePath = path.join(this.context.extensionPath, 'media', 'settingsWebview.html');
+		let html = `<html><body><h3>Failed to load settings template.</h3></body></html>`;
+		try { html = fs.readFileSync(templatePath, 'utf8'); } catch (e) { /* fall through with basic error */ }
+		return html.replace(/%%CSP%%/g, csp).replace(/%%NONCE%%/g, nonce).replace(/%%STATE_JSON%%/g, () => JSON.stringify(state));
+	}
+
+	private getCspSource(): string { return this.view?.webview.cspSource || 'vscode-resource:'; }
+	private generateNonce(): string { return Array.from({ length: 32 }).map(() => 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'.charAt(Math.floor(Math.random() * 62))).join(''); }
+
 }
+
+// -------------------------
+// Extension activation
+// -------------------------
 
 export function activate(context: vscode.ExtensionContext) {
-    const provider = new BeastModeSettingsWebviewProvider(context);
-    // Ensure provider disposes resources on deactivate
-    context.subscriptions.push(provider);
-    context.subscriptions.push(
-        vscode.window.registerWebviewViewProvider(BeastModeSettingsWebviewProvider.viewType, provider)
-    );
+	const provider = new BeastModeSettingsWebviewProvider(context);
+	context.subscriptions.push(vscode.window.registerWebviewViewProvider(BeastModeSettingsWebviewProvider.viewType, provider));
+	provider.startExternalWatchers();
 
-    // Keep webview synchronized with external changes
-    provider.startExternalWatchers();
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('beast-mode.refreshSettings', () => provider['postState']?.())
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('beast-mode.toggleAutoApprove', async () => {
-            const config = vscode.workspace.getConfiguration();
-            const cur = config.get<boolean>('chat.tools.autoApprove');
-            await config.update('chat.tools.autoApprove', !cur, vscode.ConfigurationTarget.Global);
-            vscode.window.showInformationMessage(`Auto Approve is now ${!cur ? 'Enabled' : 'Disabled'}`);
-            provider['postState']?.();
-        })
-    );
-
-    context.subscriptions.push(
-        vscode.commands.registerCommand('beast-mode.setMaxRequests', async () => {
-            const config = vscode.workspace.getConfiguration();
-            const cur = config.get<number>('chat.agent.maxRequests') || 1;
-            const val = await vscode.window.showInputBox({
-                title: 'Set Max Agent Requests',
-                value: String(cur),
-                validateInput: v => /^(\d+)$/.test(v) ? undefined : 'Enter a positive integer'
-            });
-            if (val) {
-                await config.update('chat.agent.maxRequests', parseInt(val, 10), vscode.ConfigurationTarget.Global);
-                provider['postState']?.();
-            }
-        })
-    );
+	// Small convenience command to refresh the settings view from command palette.
+	context.subscriptions.push(vscode.commands.registerCommand('beast-mode.refreshSettings', () => provider['postState']?.()));
 }
 
-export function deactivate() {}
+export function deactivate() { /* nothing to do — provider disposes via subscriptions */ }

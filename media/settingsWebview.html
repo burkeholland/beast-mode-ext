@@ -23,6 +23,10 @@
       font-size: 14px;
       margin: 4px 0 12px;
       letter-spacing: .2px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
     }
 
     h2 {
@@ -51,8 +55,11 @@
       border-radius: 0;
       background: transparent;
       overflow: visible;
+      /* enable container queries so we can respond to the panel's width */
+      container-type: inline-size;
     }
 
+    /* Default layout: two-column with controls on the right */
     .setting {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -108,7 +115,6 @@
       line-height: 1.35;
     }
 
-    /* Right-side controls */
     .setting-right {
       display: flex;
       gap: 8px;
@@ -243,19 +249,6 @@
       width: 17px;
     }
 
-    /* Keybindings */
-    .keybinding-list .setting-main label {
-      margin: 0;
-    }
-
-    kbd {
-      font: 11px/1 var(--vscode-font-family);
-      background: var(--vscode-editor-background);
-      padding: 3px 7px;
-      border: 1px solid var(--vscode-widget-border);
-      border-radius: 6px;
-    }
-
     /* Buttons */
     button.inline {
       background: transparent;
@@ -349,16 +342,76 @@
   top: var(--_arrow-top, -4px);
   transform: rotate(var(--_arrow-rotate, 45deg));
     }
+
+    /* Compact remote indicator */
+    .remote-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 6px;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      font-size: 12px;
+      border: 1px solid transparent;
+      transition: background .12s ease, border-color .12s ease, transform .06s ease;
+    }
+
+    .remote-indicator:focus,
+    .remote-indicator:hover {
+      outline: none;
+      border-color: color-mix(in srgb, var(--vscode-button-background) 16%, transparent);
+      background: color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(0,0,0,0.04)) 50%, transparent);
+    }
+
+    .remote-indicator .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--vscode-inputValidation-infoBorder, #0ea5e9);
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--vscode-list-hoverBackground, rgba(0,0,0,0.04)) 30%, transparent);
+      transition: transform .18s ease, opacity .18s ease;
+    }
+
+    .remote-indicator.loading { opacity: .9; }
+
+    .remote-indicator .spinner {
+      width: 14px;
+      height: 14px;
+      border: 2px solid transparent;
+      border-top-color: var(--vscode-button-foreground);
+      border-right-color: var(--vscode-button-foreground);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+
+    @keyframes pulse { 0% { transform: scale(1); opacity: 1 } 50% { transform: scale(1.35); opacity: .7 } 100% { transform: scale(1); opacity: 1 } }
+
+    .settings-footer {
+      margin-top: 14px;
+      font-size: 12px;
+      color: var(--vscode-foreground);
+      opacity: .8;
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .settings-footer .last-checked { font-size: 12px; opacity: .85; }
+
   </style>
 </head>
 
 <body>
-  <h1>Beast Mode Configuration</h1>
+  <h1>Beast Mode Configuration <span id="remoteIndicatorRoot"></span></h1>
+  <div id="remoteBannerContainer" aria-live="polite" style="display:none"></div>
   <div id="settingsContainer" role="region" aria-label="Settings"></div>
 
-  <div class="section">
-    <h2>Keybindings</h2>
-    <div class="settings-list keybinding-list" id="keybindingsContainer" role="region" aria-label="Keybindings"></div>
+  <div class="settings-footer" id="settingsFooter" role="contentinfo">
+    <div></div>
+    <div class="last-checked" id="footerLastChecked">Last checked: Never</div>
   </div>
 
   <script type="application/json" id="initialState" nonce="%%NONCE%%">%%STATE_JSON%%</script>
@@ -399,19 +452,17 @@
       /** Typedefs (for editors) */
   /**
    * @typedef {{ key:string,title?:string,description:string,type:'boolean'|'number'|'string'|'json', group?:string, min?:number, step?:number, options?:{value:string,label?:string}[], info?:string, missingExtensions?:string[] }} SettingDef
-   * @typedef {{ command:string, title:string, current?:string }} KeybindingItem
-   * @typedef {{ key:string, title:string, description:string, keybinding: { command:string, key:string, when?:string }, disables?: Array<{ command:string, key:string, when?:string }>, enabled:boolean }} KeybindingToggle
-   * @typedef {{ settings: Record<string, any>, definitions: SettingDef[], groups: string[], keybindings: KeybindingItem[], keybindingToggles: KeybindingToggle[] }} SettingsState
+   * @typedef {{ settings: Record<string, any>, definitions: SettingDef[], groups: string[] }} SettingsState
    */
 
       // State
       const stateEl = /** @type {HTMLScriptElement|null} */ (document.getElementById('initialState'));
       /** @type {SettingsState} */
-  let currentState = safeParseJSON(stateEl?.textContent || '') || { settings: {}, definitions: [], groups: [], keybindings: [], keybindingToggles: [] };
+  let currentState = safeParseJSON(stateEl?.textContent || '') || { settings: {}, definitions: [], groups: [] };
 
       /** DOM roots */
       const settingsRoot = /** @type {HTMLElement} */($('#settingsContainer'));
-      const keybindingsRoot = /** @type {HTMLElement} */($('#keybindingsContainer'));
+      const remoteBannerContainer = /** @type {HTMLElement} */($('#remoteBannerContainer'));
 
       /** Tooltip management */
       let tooltipEl = /** @type {HTMLDivElement|null} */(null);
@@ -522,7 +573,7 @@
       /** Post helpers */
       const postUpdate = (key, value) => vscode.postMessage({ type: 'updateSetting', key, value });
       const postInstall = (ids) => vscode.postMessage({ type: 'installExtensions', ids });
-  const postToggleKb = (key, enabled) => vscode.postMessage({ type: 'toggleKeybinding', key, enabled });
+      const postCheckRemote = () => vscode.postMessage({ type: 'checkRemoteNow' });
 
       /** Controls factory **/
       const makeSelect = (def, value, disabled) => {
@@ -603,9 +654,80 @@
           frag.appendChild(section);
         }
         settingsRoot.appendChild(frag);
+        renderRemoteBanner();
+      };
 
-        // Keybindings
-        renderKeybindings();
+      /** Render remote update indicator (compact) */
+      const renderRemoteBanner = () => {
+        // Compact indicator in header and timestamp in footer
+        const indicatorRoot = document.getElementById('remoteIndicatorRoot');
+        const footerTs = document.getElementById('footerLastChecked');
+        if (!indicatorRoot || !footerTs) return;
+
+        const lastCheckedISO = currentState.remoteLastChecked || null;
+        const formatChecked = (iso) => {
+          if (!iso) return 'Never';
+          try { const d = new Date(iso); return d.toLocaleString(); } catch { return iso; }
+        };
+
+        // Indicator: dot color reflects pending state
+        indicatorRoot.innerHTML = '';
+        const ind = el('button', { className: 'remote-indicator', type: 'button', title: currentState.remotePending ? 'Remote config update available' : 'Remote config up to date', 'aria-pressed': 'false' });
+        const dot = el('span', { className: 'dot' });
+        ind.appendChild(dot);
+
+        // If pending, show a compact 'Update' label; otherwise show subtle 'Status' text
+        if (currentState.remotePending) {
+          const note = el('span', { className: 'label' }, 'Update');
+          ind.appendChild(note);
+        } else {
+          const note = el('span', { className: 'label' }, 'Remote');
+          ind.appendChild(note);
+        }
+
+        // Click behaviour: trigger a manual check and show spinner feedback
+        ind.addEventListener('click', () => {
+          // show immediate feedback
+          ind.classList.add('loading');
+          ind.setAttribute('aria-pressed', 'true');
+          const spinner = el('span', { className: 'spinner' });
+          // prefer to show spinner instead of label
+          const labelEl = ind.querySelector('.label');
+          if (labelEl) labelEl.style.display = 'none';
+          ind.appendChild(spinner);
+          // Post message to extension to check now
+          postCheckRemote();
+          // Clear visual loading after a few seconds in case extension doesn't update state
+          setTimeout(() => {
+            try { ind.classList.remove('loading'); ind.setAttribute('aria-pressed', 'false'); if (spinner.parentNode) spinner.parentNode.removeChild(spinner); if (labelEl) labelEl.style.display = ''; } catch {};
+          }, 4000);
+        });
+
+        indicatorRoot.appendChild(ind);
+
+        footerTs.textContent = `Last checked: ${formatChecked(lastCheckedISO)}`;
+      };
+
+      const remoteCheckWithFeedback = (btnEl) => {
+        if (!btnEl) return;
+        btnEl.classList.add('loading');
+        const spinner = el('span', { className: 'spinner' });
+        btnEl.prepend(spinner);
+        // Send request to extension
+        postCheckRemote();
+        // After a short timeout, clear loading state in case extension response is delayed; extension will re-render and replace HTML when ready.
+        setTimeout(() => {
+          try {
+            btnEl.classList.remove('loading');
+            const fc = btnEl.firstChild;
+            if (fc && fc.nodeType === 1) {
+              const fe = /** @type {Element} */ (fc);
+              if (fe.classList && typeof fe.classList.contains === 'function' && fe.classList.contains('spinner')) {
+                btnEl.removeChild(fc);
+              }
+            }
+          } catch {}
+        }, 3000);
       };
 
       const renderSetting = (def) => {
@@ -668,37 +790,34 @@
         return row;
       };
 
-      const renderKeybindings = () => {
-        keybindingsRoot.innerHTML = '';
-        const frag = document.createDocumentFragment();
-        for (const kb of currentState.keybindingToggles || []) {
-          const row = el('div', { className: 'setting' });
-          const main = el('div', { className: 'setting-main' });
-          main.appendChild(el('label', {}, kb.title || kb.keybinding.command));
-          main.appendChild(el('div', { className: 'desc' }, kb.keybinding.command));
-          row.appendChild(main);
-          const right = el('div', { className: 'setting-right' });
-          right.appendChild(el('kbd', {}, kb.keybinding.key));
-          // Dedicated toggle for keybindings (no settings update)
-          const kbToggle = /** @type {HTMLLabelElement} */(el('label', { className: 'switch', role: 'switch', 'aria-checked': kb.enabled }));
-          const input = /** @type {HTMLInputElement} */(el('input', { type: 'checkbox', checked: kb.enabled, 'aria-label': kb.title || kb.keybinding.command }));
-          input.addEventListener('change', () => { kbToggle.setAttribute('aria-checked', String(!!input.checked)); postToggleKb(kb.key, !!input.checked); });
-          kbToggle.appendChild(input);
-          kbToggle.appendChild(el('span', { className: 'slider' }));
-          right.appendChild(kbToggle);
-          row.appendChild(right);
-          frag.appendChild(row);
-        }
-        keybindingsRoot.appendChild(frag);
-      };
-
       // Initial render
       render();
 
-  // Global listeners to prevent lingering tooltips
-  window.addEventListener('scroll', () => hideTooltip(0), true);
-  window.addEventListener('resize', () => hideTooltip(0));
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideTooltip(0); });
+      // Listen for messages from extension that will re-render the whole webview; remove any lingering spinners on message receive
+      window.addEventListener('message', (e) => {
+        try {
+          const data = e.data;
+          if (data && data.type === 'stateUpdate') {
+            // not used currently; webview HTML is replaced on state change
+          }
+        } catch {}
+        // Clean up any loading classes/spinners in case DOM was not fully replaced
+        document.querySelectorAll('.refresh-btn.loading').forEach(b => {
+          b.classList.remove('loading');
+          const fc = b.firstChild;
+          if (fc && fc.nodeType === 1) {
+            const fe = fc;
+            if (fe.classList && typeof fe.classList.contains === 'function' && fe.classList.contains('spinner')) {
+              b.removeChild(fc);
+            }
+          }
+        });
+      });
+
+    // Global listeners to prevent lingering tooltips
+    window.addEventListener('scroll', () => hideTooltip(0), true);
+    window.addEventListener('resize', () => hideTooltip(0));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideTooltip(0); });
     })();
   </script>
 </body>

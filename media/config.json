@@ -119,19 +119,5 @@
       ],
       "requiresExtension": "GitHub.vscode-pull-request-github"
     }
-  ],
-  "keybindings": [
-    {
-      "command": "workbench.action.chat.openInEditor",
-      "title": "Open Chat in Editor",
-      "default": "ctrl+alt+u",
-      "when": "editorTextFocus"
-    },
-    {
-      "command": "workbench.action.chat.submit",
-      "title": "Submit Chat Message",
-      "default": "ctrl+enter",
-      "when": ""
-    }
   ]
 }

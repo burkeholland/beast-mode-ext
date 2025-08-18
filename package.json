@@ -29,6 +29,10 @@
       {
         "command": "beast-mode.refreshSettings",
         "title": "Beast Mode: Refresh Settings View"
+      },
+      {
+        "command": "beast-mode.forceRefreshConfig",
+        "title": "Beast Mode: Force Refresh Remote Config"
       }
     ],
     "viewsContainers": {
@@ -49,7 +53,18 @@
           "icon": "media/icons/lion-head.svg"
         }
       ]
-  }
+    },
+    "configuration": {
+      "type": "object",
+      "title": "Beast Mode",
+      "properties": {
+        "beastMode.remoteConfigUrl": {
+          "type": "string",
+          "description": "Optional URL (raw JSON) for remote settings config. Leave blank to use bundled config.json.",
+          "default": "https://gist.githubusercontent.com/burkeholland/9fb534608b899badb4fc4ca649056f0e/raw/3725acdbaa8b1716cdcf24d20370cc370ed0b914/config.json"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
