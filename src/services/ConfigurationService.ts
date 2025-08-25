@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { IConfigurationService, IHttpService, ISchemaInferenceService, ConfigurationLoadResult, SettingDefinition } from '../types';
+import { IConfigurationService, IHttpService, ISchemaInferenceService, INewSettingsTracker, ConfigurationLoadResult, SettingDefinition } from '../types';
 
 /**
  * Service for loading and managing configuration from remote and local sources

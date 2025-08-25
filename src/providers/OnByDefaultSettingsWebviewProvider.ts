@@ -5,6 +5,7 @@ import {
 	IConfigurationService, 
 	IStateManager, 
 	IHtmlRenderer, 
+	INewSettingsTracker,
 	SettingDefinition 
 } from '../types';
 
@@ -22,7 +23,8 @@ export class OnByDefaultSettingsWebviewProvider implements vscode.WebviewViewPro
 		private readonly context: vscode.ExtensionContext,
 		private readonly configService: IConfigurationService,
 		private readonly stateManager: IStateManager,
-		private readonly htmlRenderer: IHtmlRenderer
+		private readonly htmlRenderer: IHtmlRenderer,
+		private readonly newSettingsTracker: INewSettingsTracker
 	) {}
 
 	/**
@@ -141,6 +143,14 @@ export class OnByDefaultSettingsWebviewProvider implements vscode.WebviewViewPro
 				await this.handleInstallExtensions(message);
 				break;
 
+			case 'markAsSeen':
+				await this.handleMarkAsSeen(message);
+				break;
+
+			case 'markAllAsSeen':
+				await this.handleMarkAllAsSeen();
+				break;
+
 			default:
 				// Unknown message types are ignored
 				break;
@@ -154,6 +164,9 @@ export class OnByDefaultSettingsWebviewProvider implements vscode.WebviewViewPro
 		try {
 			const result = await this.configService.loadConfiguration();
 			this.settingDefinitions = result.definitions;
+			
+			// Initialize new settings tracker with current configuration
+			await this.newSettingsTracker.initialize(this.settingDefinitions);
 		} catch {
 			// Configuration loading errors are handled gracefully
 			this.settingDefinitions = [];
@@ -203,6 +216,12 @@ export class OnByDefaultSettingsWebviewProvider implements vscode.WebviewViewPro
 		if (typeof message.key === 'string') {
 			try {
 				await this.stateManager.updateSetting(message.key, message.value);
+				
+				// Automatically mark the setting as seen when user modifies it
+				if (this.newSettingsTracker.isSettingNew(message.key)) {
+					await this.newSettingsTracker.markAsSeen([message.key]);
+				}
+				
 				this.updateWebviewState();
 			} catch {
 				// Setting update errors are handled gracefully
@@ -220,6 +239,32 @@ export class OnByDefaultSettingsWebviewProvider implements vscode.WebviewViewPro
 			} catch {
 				// Installation errors are handled gracefully
 			}
+		}
+	}
+
+	/**
+	 * Handle mark as seen request for specific settings
+	 */
+	private async handleMarkAsSeen(message: any): Promise<void> {
+		if (Array.isArray(message.settingKeys) && message.settingKeys.length > 0) {
+			try {
+				await this.newSettingsTracker.markAsSeen(message.settingKeys);
+				this.updateWebviewState();
+			} catch {
+				// Mark as seen errors are handled gracefully
+			}
+		}
+	}
+
+	/**
+	 * Handle mark all as seen request
+	 */
+	private async handleMarkAllAsSeen(): Promise<void> {
+		try {
+			await this.newSettingsTracker.markAllAsSeen(this.settingDefinitions);
+			this.updateWebviewState();
+		} catch {
+			// Mark all as seen errors are handled gracefully
 		}
 	}
 

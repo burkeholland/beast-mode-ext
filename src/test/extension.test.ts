@@ -4,7 +4,7 @@ import * as assert from 'assert';
 // as well as import your extension to test it
 import * as vscode from 'vscode';
 import { StateManager } from '../utils/StateManager';
-import { SettingDefinition } from '../types';
+import { SettingDefinition, INewSettingsTracker } from '../types';
 // import * as myExtension from '../../extension';
 
 suite('Extension Test Suite', () => {
@@ -42,7 +42,18 @@ suite('Extension Test Suite', () => {
 			subscriptions: []
 		} as any;
 
-		const stateManager = new StateManager(mockContext);
+		// Mock the new settings tracker
+		const mockNewSettingsTracker: INewSettingsTracker = {
+			initialize: async () => {},
+			detectNewSettings: () => [],
+			markAsSeen: async () => {},
+			markAllAsSeen: async () => {},
+			isSettingNew: () => false,
+			getNewSettingsCount: () => 0,
+			clearState: async () => {}
+		};
+
+		const stateManager = new StateManager(mockContext, mockNewSettingsTracker);
 
 		// Set up test configuration values
 		const config = vscode.workspace.getConfiguration();
@@ -100,7 +111,18 @@ suite('Extension Test Suite', () => {
 			subscriptions: []
 		} as any;
 
-		const stateManager = new StateManager(mockContext);
+		// Mock the new settings tracker
+		const mockNewSettingsTracker: INewSettingsTracker = {
+			initialize: async () => {},
+			detectNewSettings: () => [],
+			markAsSeen: async () => {},
+			markAllAsSeen: async () => {},
+			isSettingNew: () => false,
+			getNewSettingsCount: () => 0,
+			clearState: async () => {}
+		};
+
+		const stateManager = new StateManager(mockContext, mockNewSettingsTracker);
 
 		// Set up test configuration values using existing registered settings
 		const config = vscode.workspace.getConfiguration();
@@ -138,5 +160,55 @@ suite('Extension Test Suite', () => {
 		assert.strictEqual(evaluated[0].matchesRecommendation, true);
 		assert.strictEqual(evaluated[1].matchesRecommendation, true);
 		assert.strictEqual(evaluated[2].matchesRecommendation, true);
+	});
+
+	test('New settings detection and marking integration', async () => {
+		const mockContext = {
+			extensionPath: __dirname,
+			globalState: new Map(),
+			subscriptions: []
+		} as any;
+
+		// Mock the new settings tracker
+		const mockNewSettingsTracker: INewSettingsTracker = {
+			initialize: async () => {},
+			detectNewSettings: (definitions) => definitions.filter(def => def.key === 'new.setting'),
+			markAsSeen: async () => {},
+			markAllAsSeen: async () => {},
+			isSettingNew: (key) => key === 'new.setting',
+			getNewSettingsCount: (definitions) => definitions.filter(def => def.key === 'new.setting').length,
+			clearState: async () => {}
+		};
+
+		const stateManager = new StateManager(mockContext, mockNewSettingsTracker);
+
+		const definitions: SettingDefinition[] = [
+			{
+				key: 'existing.setting',
+				type: 'boolean',
+				group: 'Test',
+				description: 'Existing setting'
+			},
+			{
+				key: 'new.setting',
+				type: 'string',
+				group: 'Test',
+				description: 'New setting'
+			}
+		];
+
+		const state = stateManager.buildWebviewState(definitions);
+
+		// Check that new settings information is included in state
+		assert.strictEqual(state.hasNewSettings, true);
+		assert.strictEqual(state.newSettingsCount, 1);
+		assert.strictEqual(state.newSettingsByGroup?.['Test'], 1);
+
+		// Check that settings are marked correctly
+		const existingSetting = state.definitions.find(def => def.key === 'existing.setting');
+		const newSetting = state.definitions.find(def => def.key === 'new.setting');
+
+		assert.strictEqual(existingSetting?.isNew, false);
+		assert.strictEqual(newSetting?.isNew, true);
 	});
 });

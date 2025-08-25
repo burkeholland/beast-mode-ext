@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { HttpService } from './services/HttpService';
 import { ConfigurationService } from './services/ConfigurationService';
 import { SchemaInferenceService } from './services/SchemaInferenceService';
+import { NewSettingsTracker } from './services/NewSettingsTracker';
 
 // Utilities
 import { StateManager } from './utils/StateManager';
@@ -22,6 +23,7 @@ class ServiceContainer {
 	private _httpService?: HttpService;
 	private _schemaService?: SchemaInferenceService;
 	private _configService?: ConfigurationService;
+	private _newSettingsTracker?: NewSettingsTracker;
 	private _stateManager?: StateManager;
 	private _htmlRenderer?: HtmlRenderer;
 	private _provider?: OnByDefaultSettingsWebviewProvider;
@@ -51,6 +53,16 @@ class ServiceContainer {
 	}
 
 	/**
+	 * Get new settings tracker instance
+	 */
+	get newSettingsTracker(): NewSettingsTracker {
+		if (!this._newSettingsTracker) {
+			this._newSettingsTracker = new NewSettingsTracker(this.context);
+		}
+		return this._newSettingsTracker;
+	}
+
+	/**
 	 * Get configuration service instance
 	 */
 	get configService(): ConfigurationService {
@@ -69,7 +81,7 @@ class ServiceContainer {
 	 */
 	get stateManager(): StateManager {
 		if (!this._stateManager) {
-			this._stateManager = new StateManager(this.context);
+			this._stateManager = new StateManager(this.context, this.newSettingsTracker);
 		}
 		return this._stateManager;
 	}
@@ -93,7 +105,8 @@ class ServiceContainer {
 				this.context,
 				this.configService,
 				this.stateManager,
-				this.htmlRenderer
+				this.htmlRenderer,
+				this.newSettingsTracker
 			);
 		}
 		return this._provider;

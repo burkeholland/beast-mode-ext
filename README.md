@@ -11,6 +11,8 @@ Dedicated Activity Bar icon ("On By Default") with a settings view listing core 
 
 **Recommendation Indicators**: Settings that have recommended values will show a yellow dot indicator when your current value differs from the recommended best practice. Hover over the indicator to see the recommended value.
 
+**New Settings Notifications**: When new settings are added to your configuration, they will be marked with a "NEW" badge and summarized in the header. You can mark individual settings as seen or mark all new settings as seen at once.
+
 Keybinding:
 
 * Open Chat In Editor: `Ctrl+Alt+U` → `workbench.action.chat.openInEditor`.
@@ -25,9 +27,11 @@ Commands (via Command Palette):
 
 1. Click the On By Default activity bar icon.
 2. Open the "Settings" view.
-3. Click
-	* Auto Approve item to toggle true/false.
-	* Max Requests item to enter a new integer.
+3. Configure settings by:
+   * Clicking Auto Approve item to toggle true/false.
+   * Clicking Max Requests item to enter a new integer.
+   * Marking new settings as "seen" when they appear with NEW badges.
+   * Using the new settings summary in the header to manage all new settings at once.
 
 Changes apply to User settings (global) immediately and the view refreshes automatically.
 

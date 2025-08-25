@@ -134,6 +134,94 @@
       outline-offset: 2px;
     }
 
+    /* New setting indicator */
+    .new-indicator {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1px 6px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-radius: 10px;
+      background: var(--vscode-button-background, #0e639c);
+      color: var(--vscode-button-foreground, #ffffff);
+      margin-left: 8px;
+      animation: pulse-new 2s ease-in-out infinite;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    @keyframes pulse-new {
+      0% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.8; transform: scale(1.05); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+
+    .new-indicator:hover {
+      animation-play-state: paused;
+      opacity: 1;
+      transform: scale(1.05);
+    }
+
+    /* New settings summary */
+    .new-settings-summary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--vscode-button-background, #0e639c) 15%, transparent);
+      border: 1px solid color-mix(in srgb, var(--vscode-button-background, #0e639c) 30%, transparent);
+      color: var(--vscode-foreground);
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .new-settings-summary:hover {
+      background: color-mix(in srgb, var(--vscode-button-background, #0e639c) 25%, transparent);
+      border-color: color-mix(in srgb, var(--vscode-button-background, #0e639c) 50%, transparent);
+    }
+
+    .new-settings-count {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--vscode-button-background, #0e639c);
+      color: var(--vscode-button-foreground, #ffffff);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    /* Mark as seen buttons */
+    .mark-seen-btn {
+      background: transparent;
+      color: var(--vscode-textLink-foreground);
+      border: 1px solid var(--vscode-textLink-foreground);
+      border-radius: 4px;
+      height: 22px;
+      padding: 0 8px;
+      cursor: pointer;
+      font-size: 11px;
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+
+    .mark-seen-btn:hover {
+      background: var(--vscode-textLink-foreground);
+      color: var(--vscode-editor-background);
+    }
+
+    .mark-seen-btn:focus {
+      outline: 1px solid var(--vscode-focusBorder);
+      outline-offset: 1px;
+    }
+
     .desc {
       font-size: 11.5px;
       opacity: .78;
@@ -430,7 +518,10 @@
 </head>
 
 <body>
-  <h1>On By Default Configuration <span id="remoteIndicatorRoot"></span></h1>
+  <h1>On By Default Configuration 
+    <span id="remoteIndicatorRoot"></span>
+    <span id="newSettingsSummary" style="display:none"></span>
+  </h1>
   <div id="remoteBannerContainer" aria-live="polite" style="display:none"></div>
   <div id="settingsContainer" role="region" aria-label="Settings"></div>
 
@@ -599,6 +690,8 @@
       const postUpdate = (key, value) => vscode.postMessage({ type: 'updateSetting', key, value });
       const postInstall = (ids) => vscode.postMessage({ type: 'installExtensions', ids });
       const postCheckRemote = () => vscode.postMessage({ type: 'checkRemoteNow' });
+      const postMarkAsSeen = (settingKeys) => vscode.postMessage({ type: 'markAsSeen', settingKeys });
+      const postMarkAllAsSeen = () => vscode.postMessage({ type: 'markAllAsSeen' });
 
       /** Controls factory **/
       const makeRecommendationIndicator = (def) => {
@@ -643,6 +736,43 @@
           }
         }
         return String(value);
+      };
+
+      const makeNewIndicator = (def) => {
+        if (!def.isNew) {
+          return null;
+        }
+
+        const indicator = el('span', {
+          className: 'new-indicator',
+          textContent: 'NEW',
+          'aria-label': 'This is a new setting',
+          role: 'img'
+        });
+
+        return indicator;
+      };
+
+      const makeMarkAsSeenButton = (def) => {
+        if (!def.isNew) {
+          return null;
+        }
+
+        const button = el('button', {
+          className: 'mark-seen-btn',
+          textContent: 'Mark as Seen',
+          type: 'button',
+          'aria-label': `Mark ${def.key} as seen`,
+          title: 'Mark this setting as seen'
+        });
+
+        button.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          postMarkAsSeen([def.key]);
+        });
+
+        return button;
       };
 
       const makeSelect = (def, value, disabled) => {
@@ -724,6 +854,7 @@
         }
         settingsRoot.appendChild(frag);
         renderRemoteBanner();
+        renderNewSettingsSummary();
       };
 
       /** Render remote update indicator (compact) */
@@ -775,6 +906,47 @@
         indicatorRoot.appendChild(ind);
 
         footerTs.textContent = `Last checked: ${formatChecked(lastCheckedISO)}`;
+      };
+
+      /** Render new settings summary in header */
+      const renderNewSettingsSummary = () => {
+        const summaryRoot = document.getElementById('newSettingsSummary');
+        if (!summaryRoot) return;
+
+        // Clear existing content
+        summaryRoot.innerHTML = '';
+
+        // Only show if there are new settings
+        if (!currentState.hasNewSettings || !currentState.newSettingsCount) {
+          summaryRoot.style.display = 'none';
+          return;
+        }
+
+        summaryRoot.style.display = 'inline-flex';
+
+        const summary = el('div', { className: 'new-settings-summary' });
+        
+        // Count indicator
+        const count = el('span', { className: 'new-settings-count' }, String(currentState.newSettingsCount));
+        
+        // Text label
+        const label = el('span', {}, `new setting${currentState.newSettingsCount === 1 ? '' : 's'}`);
+        
+        summary.appendChild(count);
+        summary.appendChild(label);
+
+        // Click to mark all as seen
+        summary.addEventListener('click', () => {
+          postMarkAllAsSeen();
+        });
+
+        // Add tooltip
+        summary.addEventListener('mouseenter', () => {
+          showTooltip(summary, `${currentState.newSettingsCount} new setting${currentState.newSettingsCount === 1 ? '' : 's'} available. Click to mark all as seen.`);
+        });
+        summary.addEventListener('mouseleave', () => hideTooltip());
+
+        summaryRoot.appendChild(summary);
       };
 
       const remoteCheckWithFeedback = (btnEl) => {
@@ -831,6 +1003,12 @@
         if (recommendationIndicator) {
           heading.appendChild(recommendationIndicator);
         }
+
+        // Add new setting indicator if applicable
+        const newIndicator = makeNewIndicator(def);
+        if (newIndicator) {
+          heading.appendChild(newIndicator);
+        }
         main.appendChild(heading);
         main.appendChild(el('div', { className: 'desc' }, def.description));
 
@@ -861,6 +1039,12 @@
           const btn = el('button', { className: 'inline', type: 'button' }, 'Install');
           btn.addEventListener('click', () => postInstall(missing));
           right.appendChild(btn);
+        }
+
+        // Add mark-as-seen button for new settings
+        const markSeenBtn = makeMarkAsSeenButton(def);
+        if (markSeenBtn) {
+          right.appendChild(markSeenBtn);
         }
 
         row.appendChild(right);

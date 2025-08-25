@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { IStateManager, SettingDefinition, SettingsState, RecommendationSummary } from '../types';
+import { IStateManager, INewSettingsTracker, SettingDefinition, SettingsState, RecommendationSummary } from '../types';
 
 /**
  * Service for managing application state and VS Code configuration
@@ -8,7 +8,10 @@ export class StateManager implements IStateManager {
 	private static readonly GLOBAL_PENDING_KEY = 'remoteConfig.hasPendingChanges';
 	private static readonly GLOBAL_LAST_CHECKED = 'remoteConfig.lastChecked';
 
-	constructor(private readonly context: vscode.ExtensionContext) {}
+	constructor(
+		private readonly context: vscode.ExtensionContext,
+		private readonly newSettingsTracker: INewSettingsTracker
+	) {}
 
 	/**
 	 * Collect current setting values from VS Code configuration
@@ -103,20 +106,36 @@ export class StateManager implements IStateManager {
 	}
 
 	/**
+	 * Calculate count of new settings per group
+	 */
+	private calculateNewSettingsByGroup(definitions: SettingDefinition[]): Record<string, number> {
+		const groupCounts: Record<string, number> = {};
+
+		for (const def of definitions) {
+			if (def.isNew) {
+				groupCounts[def.group] = (groupCounts[def.group] || 0) + 1;
+			}
+		}
+
+		return groupCounts;
+	}
+
+	/**
 	 * Build complete webview state including settings, definitions, and metadata
 	 */
 	buildWebviewState(definitions: SettingDefinition[]): SettingsState {
 		// Evaluate recommendations first
 		const evaluatedDefinitions = this.evaluateRecommendations(definitions);
 
-		// Enrich definitions with extension availability info
+		// Mark new settings
 		const enrichedDefinitions = evaluatedDefinitions.map(def => {
 			const requires = Array.isArray(def.requires) ? def.requires : [];
 			const missingExtensions = requires.filter(id => !vscode.extensions.getExtension(id));
 			
 			return {
 				...def,
-				missingExtensions
+				missingExtensions,
+				isNew: this.newSettingsTracker.isSettingNew(def.key)
 			} as SettingDefinition;
 		});
 
@@ -133,13 +152,21 @@ export class StateManager implements IStateManager {
 		// Calculate recommendation summary
 		const recommendationSummary = this.calculateRecommendationSummary(enrichedDefinitions);
 
+		// Calculate new settings information
+		const newSettingsCount = enrichedDefinitions.filter(def => def.isNew).length;
+		const hasNewSettings = newSettingsCount > 0;
+		const newSettingsByGroup = this.calculateNewSettingsByGroup(enrichedDefinitions);
+
 		const state: SettingsState = {
 			settings,
 			definitions: enrichedDefinitions,
 			groups,
 			remotePending,
 			remoteLastChecked: remoteLastChecked || undefined,
-			recommendationSummary
+			recommendationSummary,
+			newSettingsCount,
+			hasNewSettings,
+			newSettingsByGroup
 		};
 
 		return state;

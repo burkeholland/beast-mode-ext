@@ -21,6 +21,8 @@ export interface SettingDefinition {
 	recommended?: any; // recommended value for this setting
 	hasRecommendation?: boolean; // computed: whether a recommendation exists
 	matchesRecommendation?: boolean; // computed: whether current value matches recommendation
+	isNew?: boolean; // computed: whether this setting is new/unseen
+	seenTimestamp?: string; // computed: when user first saw this setting
 }
 
 /**
@@ -33,6 +35,15 @@ export interface RecommendationSummary {
 }
 
 /**
+ * State for tracking new settings
+ */
+export interface NewSettingsState {
+	seenSettings: Record<string, string>; // settingKey -> timestamp
+	lastConfigHash?: string; // hash of last processed config to detect changes
+	firstRun: boolean; // whether this is the first time running
+}
+
+/**
  * State object sent to the webview containing settings data
  */
 export interface SettingsState {
@@ -42,6 +53,9 @@ export interface SettingsState {
 	remotePending?: boolean;
 	remoteLastChecked?: string;
 	recommendationSummary?: RecommendationSummary;
+	newSettingsCount?: number; // count of unseen settings
+	hasNewSettings?: boolean; // whether any settings are new
+	newSettingsByGroup?: Record<string, number>; // count of new settings per group
 }
 
 /**
@@ -123,6 +137,19 @@ export interface IStateManager {
 	buildWebviewState(definitions: SettingDefinition[]): SettingsState;
 	updateSetting(key: string, value: any): Promise<void>;
 	installExtensions(extensionIds: string[]): Promise<void>;
+}
+
+/**
+ * New settings tracker interface
+ */
+export interface INewSettingsTracker {
+	initialize(definitions: SettingDefinition[]): Promise<void>;
+	detectNewSettings(definitions: SettingDefinition[]): SettingDefinition[];
+	markAsSeen(settingKeys: string[]): Promise<void>;
+	markAllAsSeen(definitions: SettingDefinition[]): Promise<void>;
+	isSettingNew(settingKey: string): boolean;
+	getNewSettingsCount(definitions: SettingDefinition[]): number;
+	clearState(): Promise<void>;
 }
 
 /**
