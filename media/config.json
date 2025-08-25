@@ -8,6 +8,7 @@
           "title": "Auto Approve Tools",
           "description": "Automatically approve tool calls in chat.",
           "type": "boolean",
+          "recommended": true,
           "info": "Skips confirmations for tool usage, including terminal commands."
         },
         {
@@ -17,19 +18,22 @@
           "type": "number",
           "min": 1,
           "step": 1,
+          "recommended": 500,
           "info": "After a certain amount of time, the agent will tell you it has been running for a while and will stop and ask you if you want to continue. Setting this to 500 will effectively keep the agent running indefinitely without interruptions."
         },
         {
           "key": "chat.todoListTool.enabled",
           "title": "TODO List Tool",
           "description": "Enable todo list in chat.",
-          "type": "boolean"
+          "type": "boolean",
+          "recommended": true
         },
         {
           "key": "chat.editor.wordWrap",
           "title": "Wrap Code Blocks",
           "description": "Toggle word wrap in code blocks.",
           "type": "string",
+          "recommended": "on",
           "options": [
             {
               "value": "off",
@@ -67,6 +71,7 @@
           "title": "Secondary Sidebar Visibility",
           "description": "Default visibility of the Secondary Side Bar.",
           "type": "string",
+          "recommended": "hidden",
           "options": [
             {
               "value": "visible",

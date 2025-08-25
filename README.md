@@ -9,6 +9,8 @@ Dedicated Activity Bar icon ("Beast Mode") with a settings view listing core AI 
 * Auto Approve (`chat.tools.autoApprove`) – boolean toggle.
 * Max Requests (`chat.agent.maxRequests`) – numeric input (integer ≥ 1).
 
+**Recommendation Indicators**: Settings that have recommended values will show a yellow dot indicator when your current value differs from the recommended best practice. Hover over the indicator to see the recommended value.
+
 Keybinding:
 
 * Open Chat In Editor: `Ctrl+Alt+U` → `workbench.action.chat.openInEditor`.

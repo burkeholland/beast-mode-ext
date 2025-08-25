@@ -109,6 +109,31 @@
       opacity: 1;
     }
 
+    /* Recommendation indicator */
+    .recommendation-indicator {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--vscode-inputValidation-warningForeground, #d19a66);
+      margin-left: 6px;
+      cursor: pointer;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .recommendation-indicator:hover {
+      transform: scale(1.2);
+      transition: transform 0.1s ease;
+    }
+
+    .recommendation-indicator:focus {
+      outline: 1px solid var(--vscode-focusBorder);
+      outline-offset: 2px;
+    }
+
     .desc {
       font-size: 11.5px;
       opacity: .78;
@@ -576,6 +601,50 @@
       const postCheckRemote = () => vscode.postMessage({ type: 'checkRemoteNow' });
 
       /** Controls factory **/
+      const makeRecommendationIndicator = (def) => {
+        if (!def.hasRecommendation || def.matchesRecommendation) {
+          return null;
+        }
+
+        const indicator = el('span', {
+          className: 'recommendation-indicator',
+          tabindex: 0,
+          'aria-label': `Recommended value: ${formatRecommendedValue(def.recommended, def.type)}`,
+          'data-recommended': def.recommended,
+          role: 'img'
+        });
+
+        const tooltipText = `Recommended: ${formatRecommendedValue(def.recommended, def.type)}`;
+        
+        // Mouse and keyboard interactions
+        indicator.addEventListener('mouseenter', () => showTooltip(indicator, tooltipText));
+        indicator.addEventListener('mouseleave', () => hideTooltip());
+        indicator.addEventListener('focus', () => showTooltip(indicator, tooltipText));
+        indicator.addEventListener('blur', () => hideTooltip(0));
+        indicator.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape') hideTooltip(0);
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            showTooltip(indicator, tooltipText);
+          }
+        });
+
+        return indicator;
+      };
+
+      const formatRecommendedValue = (value, type) => {
+        if (value === null || value === undefined) return 'null';
+        if (type === 'boolean') return value ? 'true' : 'false';
+        if (type === 'json') {
+          try {
+            return JSON.stringify(value);
+          } catch {
+            return String(value);
+          }
+        }
+        return String(value);
+      };
+
       const makeSelect = (def, value, disabled) => {
         const select = /** @type {HTMLSelectElement} */(el('select', { className: 'select-control', disabled }));
         for (const opt of def.options || []) {
@@ -738,6 +807,8 @@
         const labelId = idFromKey(def.key) + '-label';
         const label = el('label', { id: labelId, htmlFor: idFromKey(def.key) }, def.title || def.key.split('.').slice(-1)[0]);
         const heading = el('div', { className: 'heading' }, [label]);
+        
+        // Add info icon if available
         if (def.info) {
           const infoEl = el('span', { className: 'info', tabindex: 0, 'aria-label': 'More info', 'data-info': def.info }, 'i');
           // Mouse and keyboard interactions
@@ -753,6 +824,12 @@
             }
           });
           heading.appendChild(infoEl);
+        }
+
+        // Add recommendation indicator if applicable
+        const recommendationIndicator = makeRecommendationIndicator(def);
+        if (recommendationIndicator) {
+          heading.appendChild(recommendationIndicator);
         }
         main.appendChild(heading);
         main.appendChild(el('div', { className: 'desc' }, def.description));
