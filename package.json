@@ -15,24 +15,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "on-by-default.helloWorld",
-        "title": "Hello World"
-      },
-      {
-        "command": "on-by-default.toggleAutoApprove",
-        "title": "On By Default: Toggle Auto Approve"
-      },
-      {
-        "command": "on-by-default.setMaxRequests",
-        "title": "On By Default: Set Max Requests"
-      },
-      {
         "command": "on-by-default.refreshSettings",
         "title": "On By Default: Refresh Settings View"
-      },
-      {
-        "command": "on-by-default.forceRefreshConfig",
-        "title": "On By Default: Force Refresh Remote Config"
       }
     ],
     "viewsContainers": {
