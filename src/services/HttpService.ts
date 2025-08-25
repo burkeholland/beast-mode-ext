@@ -10,7 +10,7 @@ import { IHttpService, HttpRequestOptions, HttpResponse } from '../types';
  */
 export class HttpService implements IHttpService {
 	private static readonly DEFAULT_TIMEOUT = 9000;
-	private static readonly USER_AGENT = 'beast-mode-ext';
+	private static readonly USER_AGENT = 'on-by-default-ext';
 
 	constructor(private readonly context: vscode.ExtensionContext) {}
 

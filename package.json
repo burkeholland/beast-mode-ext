@@ -1,9 +1,9 @@
 {
-  "name": "beast-mode",
-  "displayName": "Beast Mode",
+  "name": "on-by-default",
+  "displayName": "On By Default",
   "description": "The ultimate VS Code configuration for AI coding",
   "version": "0.0.4",
-  "publisher": "beast-mode",
+  "publisher": "on-by-default",
   "engines": {
     "vscode": "^1.103.0"
   },
@@ -15,40 +15,40 @@
   "contributes": {
     "commands": [
       {
-        "command": "beast-mode.helloWorld",
+        "command": "on-by-default.helloWorld",
         "title": "Hello World"
       },
       {
-        "command": "beast-mode.toggleAutoApprove",
-        "title": "Beast Mode: Toggle Auto Approve"
+        "command": "on-by-default.toggleAutoApprove",
+        "title": "On By Default: Toggle Auto Approve"
       },
       {
-        "command": "beast-mode.setMaxRequests",
-        "title": "Beast Mode: Set Max Requests"
+        "command": "on-by-default.setMaxRequests",
+        "title": "On By Default: Set Max Requests"
       },
       {
-        "command": "beast-mode.refreshSettings",
-        "title": "Beast Mode: Refresh Settings View"
+        "command": "on-by-default.refreshSettings",
+        "title": "On By Default: Refresh Settings View"
       },
       {
-        "command": "beast-mode.forceRefreshConfig",
-        "title": "Beast Mode: Force Refresh Remote Config"
+        "command": "on-by-default.forceRefreshConfig",
+        "title": "On By Default: Force Refresh Remote Config"
       }
     ],
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "beastModeContainer",
-          "title": "Beast Mode",
+          "id": "onByDefaultContainer",
+          "title": "On By Default",
           "icon": "media/icons/lion-head.svg"
         }
       ]
     },
     "views": {
-      "beastModeContainer": [
+      "onByDefaultContainer": [
         {
           "type": "webview",
-          "id": "beastModeSettings",
+          "id": "onByDefaultSettings",
           "name": "Settings",
           "icon": "media/icons/lion-head.svg"
         }
@@ -56,9 +56,9 @@
     },
     "configuration": {
       "type": "object",
-      "title": "Beast Mode",
+      "title": "On By Default",
       "properties": {
-        "beastMode.remoteConfigUrl": {
+        "onByDefault.remoteConfigUrl": {
           "type": "string",
           "description": "Optional URL (raw JSON) for remote settings config. Leave blank to use bundled config.json.",
           "default": "https://gist.githubusercontent.com/burkeholland/9fb534608b899badb4fc4ca649056f0e/raw/3725acdbaa8b1716cdcf24d20370cc370ed0b914/config.json"

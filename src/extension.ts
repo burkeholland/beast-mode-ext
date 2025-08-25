@@ -10,7 +10,7 @@ import { StateManager } from './utils/StateManager';
 import { HtmlRenderer } from './utils/HtmlRenderer';
 
 // Providers
-import { BeastModeSettingsWebviewProvider } from './providers/BeastModeSettingsWebviewProvider';
+import { OnByDefaultSettingsWebviewProvider } from './providers/OnByDefaultSettingsWebviewProvider';
 
 /**
  * Service container for dependency injection
@@ -24,7 +24,7 @@ class ServiceContainer {
 	private _configService?: ConfigurationService;
 	private _stateManager?: StateManager;
 	private _htmlRenderer?: HtmlRenderer;
-	private _provider?: BeastModeSettingsWebviewProvider;
+	private _provider?: OnByDefaultSettingsWebviewProvider;
 
 	constructor(context: vscode.ExtensionContext) {
 		this.context = context;
@@ -87,9 +87,9 @@ class ServiceContainer {
 	/**
 	 * Get webview provider instance
 	 */
-	get provider(): BeastModeSettingsWebviewProvider {
+	get provider(): OnByDefaultSettingsWebviewProvider {
 		if (!this._provider) {
-			this._provider = new BeastModeSettingsWebviewProvider(
+			this._provider = new OnByDefaultSettingsWebviewProvider(
 				this.context,
 				this.configService,
 				this.stateManager,
@@ -120,7 +120,7 @@ export function activate(context: vscode.ExtensionContext) {
 	const provider = services.provider;
 	context.subscriptions.push(
 		vscode.window.registerWebviewViewProvider(
-			BeastModeSettingsWebviewProvider.viewType, 
+			OnByDefaultSettingsWebviewProvider.viewType, 
 			provider
 		)
 	);
@@ -130,7 +130,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Register refresh command
 	context.subscriptions.push(
-		vscode.commands.registerCommand('beast-mode.refreshSettings', () => {
+		vscode.commands.registerCommand('on-by-default.refreshSettings', () => {
 			provider.updateWebviewState();
 		})
 	);

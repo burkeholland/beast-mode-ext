@@ -1,10 +1,10 @@
-# Beast Mode (MVP)
+# On By Default (MVP)
 
 Opinionated AI-centric configuration surfaced via a simple Explorer view.
 
 ## Features
 
-Dedicated Activity Bar icon ("Beast Mode") with a settings view listing core AI settings with quick toggle / edit:
+Dedicated Activity Bar icon ("On By Default") with a settings view listing core AI settings with quick toggle / edit:
 
 * Auto Approve (`chat.tools.autoApprove`) – boolean toggle.
 * Max Requests (`chat.agent.maxRequests`) – numeric input (integer ≥ 1).
@@ -17,13 +17,13 @@ Keybinding:
 
 Commands (via Command Palette):
 
-* `Beast Mode: Toggle Auto Approve`
-* `Beast Mode: Set Max Requests`
-* `Beast Mode: Refresh Settings View`
+* `On By Default: Toggle Auto Approve`
+* `On By Default: Set Max Requests`
+* `On By Default: Refresh Settings View`
 
 ## Using the View
 
-1. Click the Beast Mode activity bar icon.
+1. Click the On By Default activity bar icon.
 2. Open the "Settings" view.
 3. Click
 	* Auto Approve item to toggle true/false.
@@ -33,7 +33,7 @@ Changes apply to User settings (global) immediately and the view refreshes autom
 
 ## Contributed (Surfaced) Settings
 
-These settings are surfaced by Beast Mode (they remain normal VS Code user settings):
+These settings are surfaced by On By Default (they remain normal VS Code user settings):
 
 | Setting | Type | Description |
 |---------|------|-------------|

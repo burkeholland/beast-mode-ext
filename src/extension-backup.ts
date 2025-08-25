@@ -36,8 +36,8 @@ interface SettingsState {
  * - enriching settings using installed extension schemas + live values
  * - exposing those settings to the webview and applying user changes
  */
-class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
-	public static readonly viewType = 'beastModeSettings';
+class OnByDefaultSettingsWebviewProvider implements vscode.WebviewViewProvider {
+	public static readonly viewType = 'onByDefaultSettings';
 
 	private view?: vscode.WebviewView;
 	private disposables: vscode.Disposable[] = [];
@@ -84,7 +84,7 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 			}
 
 			// If the remote-config URL changes, reload definitions.
-			if (e.affectsConfiguration && e.affectsConfiguration('beastMode.remoteConfigUrl')) {
+			if (e.affectsConfiguration && e.affectsConfiguration('onByDefault.remoteConfigUrl')) {
 				void (async () => {
 					await this.loadDefinitionsFromConfigSources();
 					this.postState();
@@ -207,12 +207,12 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 	// -------------------------
 
 	/**
-	 * Load definitions from: remote url (beastMode.remoteConfigUrl) OR the bundled media/config.json
+	 * Load definitions from: remote url (onByDefault.remoteConfigUrl) OR the bundled media/config.json
 	 * The loader understands grouped and single-entry formats and will enrich definitions via schema inference.
 	 */
 	private async loadDefinitionsFromConfigSources(): Promise<void> {
 		try {
-			const remoteUrl = (vscode.workspace.getConfiguration().get<string>('beastMode.remoteConfigUrl') || '').trim();
+			const remoteUrl = (vscode.workspace.getConfiguration().get<string>('onByDefault.remoteConfigUrl') || '').trim();
 			let json: any = null;
 			if (remoteUrl) {
 				json = await this.fetchAndCacheRemoteConfig(remoteUrl);
@@ -292,7 +292,7 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 
 		const doCheck = async () => {
 			try {
-				const remoteUrl = (vscode.workspace.getConfiguration().get<string>('beastMode.remoteConfigUrl') || '').trim();
+				const remoteUrl = (vscode.workspace.getConfiguration().get<string>('onByDefault.remoteConfigUrl') || '').trim();
 				if (!remoteUrl) { return; }
 				const effective = (await this.resolveToRawUrl(remoteUrl)) || remoteUrl;
 				let rawText: string | null = null;
@@ -347,7 +347,7 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 	/** Perform an immediate remote config check and mark pending if different from last known raw. */
 	private async checkRemoteNow(): Promise<void> {
 		try {
-			const remoteUrl = (vscode.workspace.getConfiguration().get<string>('beastMode.remoteConfigUrl') || '').trim();
+			const remoteUrl = (vscode.workspace.getConfiguration().get<string>('onByDefault.remoteConfigUrl') || '').trim();
 			if (!remoteUrl) {
 				try { await this.context.globalState.update(this.GLOBAL_PENDING_KEY, false); } catch {}
 				this.postState();
@@ -752,12 +752,12 @@ class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
 // -------------------------
 
 export function activate(context: vscode.ExtensionContext) {
-	const provider = new BeastModeSettingsWebviewProvider(context);
-	context.subscriptions.push(vscode.window.registerWebviewViewProvider(BeastModeSettingsWebviewProvider.viewType, provider));
+	const provider = new OnByDefaultSettingsWebviewProvider(context);
+	context.subscriptions.push(vscode.window.registerWebviewViewProvider(OnByDefaultSettingsWebviewProvider.viewType, provider));
 	provider.startExternalWatchers();
 
 	// Small convenience command to refresh the settings view from command palette.
-	context.subscriptions.push(vscode.commands.registerCommand('beast-mode.refreshSettings', () => provider['postState']?.()));
+	context.subscriptions.push(vscode.commands.registerCommand('on-by-default.refreshSettings', () => provider['postState']?.()));
 }
 
 export function deactivate() { /* nothing to do — provider disposes via subscriptions */ }

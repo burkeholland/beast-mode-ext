@@ -9,10 +9,10 @@ import {
 } from '../types';
 
 /**
- * Webview provider for Beast Mode settings management
+ * Webview provider for On By Default settings management
  */
-export class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvider {
-	public static readonly viewType = 'beastModeSettings';
+export class OnByDefaultSettingsWebviewProvider implements vscode.WebviewViewProvider {
+	public static readonly viewType = 'onByDefaultSettings';
 
 	private view?: vscode.WebviewView;
 	private disposables: vscode.Disposable[] = [];
@@ -74,7 +74,7 @@ export class BeastModeSettingsWebviewProvider implements vscode.WebviewViewProvi
 				}
 
 				// Reload configuration if remote URL changes
-				if (e.affectsConfiguration('beastMode.remoteConfigUrl')) {
+				if (e.affectsConfiguration('onByDefault.remoteConfigUrl')) {
 					this.handleRemoteConfigUrlChange();
 				}
 			})

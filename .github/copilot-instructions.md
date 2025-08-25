@@ -1,13 +1,13 @@
 # AI Contributor Instructions (updated)
 
-Purpose: Get an AI coding agent productive quickly in the Beast Mode VS Code extension.
+Purpose: Get an AI coding agent productive quickly in the On By Default VS Code extension.
 
 1) Quick architecture snapshot
 - TypeScript VS Code extension. Entry: `src/extension.ts` → compiled output `out/extension.js` (built with `tsc`).
-- UI surface: single Activity Bar container + webview view (`beastModeSettings`). Contributed in `package.json` under `viewsContainers`/`views`.
+- UI surface: single Activity Bar container + webview view (`onByDefaultSettings`). Contributed in `package.json` under `viewsContainers`/`views`.
 - Webview template: `media/settingsWebview.html`. The extension generates a JSON state and inlines it into the template by replacing `%%STATE_JSON%%` (also injects `%%CSP%%` and `%%NONCE%%`).
-- Settings metadata is loaded at runtime from either a remote URL configured in `beastMode.remoteConfigUrl` or the bundled `media/config.json`. The loader supports grouped entries and individual setting entries.
-- The provider class: `BeastModeSettingsWebviewProvider` (in `src/extension.ts`). It owns state generation, HTML rendering, and message handlers.
+- Settings metadata is loaded at runtime from either a remote URL configured in `onByDefault.remoteConfigUrl` or the bundled `media/config.json`. The loader supports grouped entries and individual setting entries.
+- The provider class: `OnByDefaultSettingsWebviewProvider` (in `src/extension.ts`). It owns state generation, HTML rendering, and message handlers.
 
 2) Runtime patterns & important behaviors
 - Activation: `activationEvents` is empty; extension registers the `WebviewViewProvider` immediately on activation (see `activate()` in `src/extension.ts`).
@@ -27,7 +27,7 @@ Purpose: Get an AI coding agent productive quickly in the Beast Mode VS Code ext
   The loader will enrich entries via schema inference and optional `requires` fields. If adding settings, prefer updating `media/config.json` (or the remote source).
 - Do NOT expect a static `settingDefinitions` array in source—definitions are constructed at runtime from config + schema inference.
 - Keybindings: this codebase currently does NOT write user keybindings. Do not add keybinding-write logic unless you update README and tests and preserve current synchronous-write patterns elsewhere.
-- Numeric validation: when prompting users (e.g. `beast-mode.setMaxRequests`) the extension uses simple regex validation. If adding UI numeric inputs, mirror the same validation pattern.
+- Numeric validation: when prompting users (e.g. `on-by-default.setMaxRequests`) the extension uses simple regex validation. If adding UI numeric inputs, mirror the same validation pattern.
 
 4) Build / test / debug workflows
 - Install deps: `npm install`.
@@ -35,13 +35,13 @@ Purpose: Get an AI coding agent productive quickly in the Beast Mode VS Code ext
 - One-off compile: `npm run compile` (also run prepublish).
 - Lint: `npm run lint` (eslint over `src`). Fix lint issues before committing.
 - Tests: `npm test` runs the VS Code test harness (`vscode-test`). Unit tests live under `test/` (example: `test/extension.test.ts`).
-- Debugging: run extension in Extension Development Host via VS Code launch configuration (default for VS Code extension projects). When iterating on webview HTML, reload the extension host or call the `beast-mode.refreshSettings` command.
+- Debugging: run extension in Extension Development Host via VS Code launch configuration (default for VS Code extension projects). When iterating on webview HTML, reload the extension host or call the `on-by-default.refreshSettings` command.
 
 5) Files & code locations to inspect when changing behavior
 - `src/extension.ts` — provider, message handling, config loading, watchers, activation hooks.
 - `media/settingsWebview.html` — webview UI template and script that consumes `%%STATE_JSON%%`.
 - `media/config.json` — bundled settings metadata (fallback/primary source when remote is unavailable).
-- `package.json` — contributions (commands, views), scripts, and `beastMode.remoteConfigUrl` default.
+- `package.json` — contributions (commands, views), scripts, and `onByDefault.remoteConfigUrl` default.
 - `README.md` — contains the "Contributed Settings" table and extension usage details.
 
 (End)

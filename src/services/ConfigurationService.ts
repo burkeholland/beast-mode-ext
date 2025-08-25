@@ -203,7 +203,7 @@ export class ConfigurationService implements IConfigurationService {
 	 * Get the remote configuration URL from settings
 	 */
 	private getRemoteConfigUrl(): string {
-		return (vscode.workspace.getConfiguration().get<string>('beastMode.remoteConfigUrl') || '').trim();
+		return (vscode.workspace.getConfiguration().get<string>('onByDefault.remoteConfigUrl') || '').trim();
 	}
 
 	/**
