@@ -151,6 +151,8 @@
       animation: pulse-new 2s ease-in-out infinite;
       position: relative;
       flex-shrink: 0;
+      cursor: pointer;
+      transition: all 0.2s ease;
     }
 
     @keyframes pulse-new {
@@ -163,6 +165,13 @@
       animation-play-state: paused;
       opacity: 1;
       transform: scale(1.05);
+      background: var(--vscode-button-hoverBackground, #1177bb);
+    }
+
+    .new-indicator:focus {
+      outline: 1px solid var(--vscode-focusBorder);
+      outline-offset: 1px;
+      animation-play-state: paused;
     }
 
     /* New settings summary */
@@ -196,30 +205,6 @@
       color: var(--vscode-button-foreground, #ffffff);
       font-size: 11px;
       font-weight: 600;
-    }
-
-    /* Mark as seen buttons */
-    .mark-seen-btn {
-      background: transparent;
-      color: var(--vscode-textLink-foreground);
-      border: 1px solid var(--vscode-textLink-foreground);
-      border-radius: 4px;
-      height: 22px;
-      padding: 0 8px;
-      cursor: pointer;
-      font-size: 11px;
-      text-decoration: none;
-      transition: all 0.2s ease;
-    }
-
-    .mark-seen-btn:hover {
-      background: var(--vscode-textLink-foreground);
-      color: var(--vscode-editor-background);
-    }
-
-    .mark-seen-btn:focus {
-      outline: 1px solid var(--vscode-focusBorder);
-      outline-offset: 1px;
     }
 
     .desc {
@@ -746,36 +731,28 @@
         const indicator = el('span', {
           className: 'new-indicator',
           textContent: 'NEW',
-          'aria-label': 'This is a new setting',
-          role: 'img'
+          'aria-label': `New setting: ${def.key}. Click to mark as seen.`,
+          role: 'button',
+          tabIndex: 0,
+          title: 'Click to mark as seen'
         });
 
-        return indicator;
-      };
-
-      const makeMarkAsSeenButton = (def) => {
-        if (!def.isNew) {
-          return null;
-        }
-
-        const button = el('button', {
-          className: 'mark-seen-btn',
-          textContent: 'Mark as Seen',
-          type: 'button',
-          'aria-label': `Mark ${def.key} as seen`,
-          title: 'Mark this setting as seen'
-        });
-
-        button.addEventListener('click', (e) => {
+        indicator.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
           postMarkAsSeen([def.key]);
         });
 
-        return button;
-      };
+        indicator.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            postMarkAsSeen([def.key]);
+          }
+        });
 
-      const makeSelect = (def, value, disabled) => {
+        return indicator;
+      };      const makeSelect = (def, value, disabled) => {
         const select = /** @type {HTMLSelectElement} */(el('select', { className: 'select-control', disabled }));
         for (const opt of def.options || []) {
           const o = el('option', { value: opt.value }, opt.label || opt.value);
@@ -1039,12 +1016,6 @@
           const btn = el('button', { className: 'inline', type: 'button' }, 'Install');
           btn.addEventListener('click', () => postInstall(missing));
           right.appendChild(btn);
-        }
-
-        // Add mark-as-seen button for new settings
-        const markSeenBtn = makeMarkAsSeenButton(def);
-        if (markSeenBtn) {
-          right.appendChild(markSeenBtn);
         }
 
         row.appendChild(right);

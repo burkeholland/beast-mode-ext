@@ -45,7 +45,7 @@
         "onByDefault.remoteConfigUrl": {
           "type": "string",
           "description": "Optional URL (raw JSON) for remote settings config. Leave blank to use bundled config.json.",
-          "default": "https://gist.githubusercontent.com/burkeholland/9fb534608b899badb4fc4ca649056f0e/raw/3725acdbaa8b1716cdcf24d20370cc370ed0b914/config.json"
+          "default": "https://gist.githubusercontent.com/burkeholland/9fb534608b899badb4fc4ca649056f0e/raw/config.json"
         }
       }
     }

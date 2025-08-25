@@ -168,10 +168,16 @@ export class HttpService implements IHttpService {
 			return null;
 		}
 
-		// Check for GitHub Gist URLs
-		const gistMatch = url.match(/gist.github(?:usercontent)?\.com\/(?:[^\/]+\/)?([0-9a-fA-F]{6,})/i);
+		// Check for GitHub raw URLs (keep as-is, no API needed)
+		if (url.includes('githubusercontent.com') && url.includes('/raw/')) {
+			return url.split('#')[0];
+		}
+
+		// Check for GitHub Gist URLs that need to be converted to raw format
+		const gistMatch = url.match(/gist\.github\.com\/(?:[^\/]+\/)?([0-9a-fA-F]{6,})/i);
 		if (gistMatch && gistMatch[1]) {
-			return `gist:${gistMatch[1]}`;
+			// Convert to raw URL format instead of using API
+			return `https://gist.githubusercontent.com/${gistMatch[1]}/raw/config.json`;
 		}
 
 		// For regular URLs, keep query parameters but strip hash
