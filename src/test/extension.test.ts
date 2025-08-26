@@ -85,20 +85,20 @@ suite('Extension Test Suite', () => {
 			}
 		];
 
-		const evaluated = stateManager.evaluateRecommendations(definitions);
+		// Use the public buildWebviewState method which internally calls evaluateRecommendations
+		const state = stateManager.buildWebviewState(definitions);
 
 		// Test hasRecommendation flags
-		assert.strictEqual(evaluated[0].hasRecommendation, true);
-		assert.strictEqual(evaluated[1].hasRecommendation, true);
-		assert.strictEqual(evaluated[2].hasRecommendation, false);
+		assert.strictEqual(state.definitions[0].hasRecommendation, true);
+		assert.strictEqual(state.definitions[1].hasRecommendation, true);
+		assert.strictEqual(state.definitions[2].hasRecommendation, false);
 
 		// Test matchesRecommendation flags
-		assert.strictEqual(evaluated[0].matchesRecommendation, false); // false !== true
-		assert.strictEqual(evaluated[1].matchesRecommendation, true);  // 50 === 50
-		assert.strictEqual(evaluated[2].matchesRecommendation, false); // no recommendation
+		assert.strictEqual(state.definitions[0].matchesRecommendation, false); // false !== true
+		assert.strictEqual(state.definitions[1].matchesRecommendation, true);  // 50 === 50
+		assert.strictEqual(state.definitions[2].matchesRecommendation, false); // no recommendation
 
 		// Test recommendation summary
-		const state = stateManager.buildWebviewState(evaluated);
 		assert.strictEqual(state.recommendationSummary?.total, 2);
 		assert.strictEqual(state.recommendationSummary?.matching, 1);
 		assert.strictEqual(state.recommendationSummary?.differing, 1);
@@ -154,12 +154,13 @@ suite('Extension Test Suite', () => {
 			}
 		];
 
-		const evaluated = stateManager.evaluateRecommendations(definitions);
+		// Use the public buildWebviewState method which internally calls evaluateRecommendations
+		const state = stateManager.buildWebviewState(definitions);
 
 		// All should match their recommended values
-		assert.strictEqual(evaluated[0].matchesRecommendation, true);
-		assert.strictEqual(evaluated[1].matchesRecommendation, true);
-		assert.strictEqual(evaluated[2].matchesRecommendation, true);
+		assert.strictEqual(state.definitions[0].matchesRecommendation, true);
+		assert.strictEqual(state.definitions[1].matchesRecommendation, true);
+		assert.strictEqual(state.definitions[2].matchesRecommendation, true);
 	});
 
 	test('New settings detection and marking integration', async () => {

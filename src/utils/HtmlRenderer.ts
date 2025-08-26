@@ -2,18 +2,17 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { IHtmlRenderer, SettingsState } from '../types';
+import { Constants } from '../constants';
+import { generateNonce, ignoreErrorsSync } from './common';
 
 /**
  * Service for rendering HTML content for the webview
  */
 export class HtmlRenderer implements IHtmlRenderer {
-	private static readonly TEMPLATE_FILE = 'settingsWebview.html';
 	private templateCache?: string;
+	private webviewView?: vscode.WebviewView;
 
-	constructor(
-		private readonly context: vscode.ExtensionContext,
-		private readonly webviewView?: vscode.WebviewView
-	) {}
+	constructor(private readonly context: vscode.ExtensionContext) {}
 
 	/**
 	 * Render HTML for the webview with injected state
@@ -33,17 +32,18 @@ export class HtmlRenderer implements IHtmlRenderer {
 	 * Generate a cryptographically secure nonce for CSP
 	 */
 	generateNonce(): string {
-		const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-		return Array.from({ length: 32 }, () => 
-			chars.charAt(Math.floor(Math.random() * chars.length))
-		).join('');
+		return generateNonce();
 	}
 
 	/**
-	 * Build Content Security Policy header
+	 * Set the webview reference for CSP source
 	 */
+	setWebviewView(webviewView: vscode.WebviewView): void {
+		this.webviewView = webviewView;
+	}
+
 	private buildContentSecurityPolicy(nonce: string): string {
-		const cspSource = this.getCspSource();
+		const cspSource = this.webviewView?.webview.cspSource || 'vscode-resource:';
 		return [
 			`default-src 'none'`,
 			`style-src ${cspSource} 'unsafe-inline'`,
@@ -51,18 +51,7 @@ export class HtmlRenderer implements IHtmlRenderer {
 		].join('; ');
 	}
 
-	/**
-	 * Get the CSP source for the webview
-	 */
-	private getCspSource(): string {
-		return this.webviewView?.webview.cspSource || 'vscode-resource:';
-	}
-
-	/**
-	 * Load HTML template from file, with caching
-	 */
 	private loadTemplate(): string {
-		// Return cached template if available
 		if (this.templateCache) {
 			return this.templateCache;
 		}
@@ -70,7 +59,7 @@ export class HtmlRenderer implements IHtmlRenderer {
 		const templatePath = path.join(
 			this.context.extensionPath, 
 			'media', 
-			HtmlRenderer.TEMPLATE_FILE
+			Constants.FILES.WEBVIEW_TEMPLATE
 		);
 
 		const fallbackHtml = `
@@ -82,27 +71,8 @@ export class HtmlRenderer implements IHtmlRenderer {
 			</html>
 		`;
 
-		try {
-			this.templateCache = fs.readFileSync(templatePath, 'utf8');
-			return this.templateCache;
-		} catch (error) {
-			console.error('Failed to load HTML template:', error);
-			return fallbackHtml;
-		}
-	}
-
-	/**
-	 * Clear the template cache (useful for development)
-	 */
-	clearTemplateCache(): void {
-		this.templateCache = undefined;
-	}
-
-	/**
-	 * Set the webview reference for CSP source
-	 */
-	setWebviewView(webviewView: vscode.WebviewView): void {
-		// Update the webview reference for CSP source
-		(this as any).webviewView = webviewView;
+		const template = ignoreErrorsSync(() => fs.readFileSync(templatePath, 'utf8'));
+		this.templateCache = template || fallbackHtml;
+		return this.templateCache;
 	}
 }

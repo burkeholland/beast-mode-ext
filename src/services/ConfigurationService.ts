@@ -1,17 +1,14 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { IConfigurationService, IHttpService, ISchemaInferenceService, INewSettingsTracker, ConfigurationLoadResult, SettingDefinition } from '../types';
+import { IConfigurationService, IHttpService, ISchemaInferenceService, ConfigurationLoadResult, SettingDefinition } from '../types';
+import { Constants } from '../constants';
+import { ignoreErrors, safeJsonParse } from '../utils/common';
 
 /**
  * Service for loading and managing configuration from remote and local sources
  */
 export class ConfigurationService implements IConfigurationService {
-	private static readonly POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-	private static readonly GLOBAL_PENDING_KEY = 'remoteConfig.hasPendingChanges';
-	private static readonly GLOBAL_LAST_RAW = 'remoteConfig.lastRawText';
-	private static readonly GLOBAL_LAST_CHECKED = 'remoteConfig.lastChecked';
-
 	private pollTimer?: NodeJS.Timeout;
 	private disposables: vscode.Disposable[] = [];
 	private _onConfigurationChanged = new vscode.EventEmitter<ConfigurationLoadResult>();
@@ -33,12 +30,10 @@ export class ConfigurationService implements IConfigurationService {
 			let json: any = null;
 			let source: 'remote' | 'local' = 'local';
 
-			// Try to load from remote first
+			// Try remote first
 			if (remoteUrl) {
-				json = await this.fetchRemoteConfig(remoteUrl);
-				if (json) {
-					source = 'remote';
-				}
+				json = await this.loadRemoteConfig(remoteUrl);
+				if (json) {source = 'remote';}
 			}
 
 			// Fallback to bundled config
@@ -46,8 +41,8 @@ export class ConfigurationService implements IConfigurationService {
 				json = await this.loadBundledConfig();
 			}
 
-			// Parse and enrich the configuration
-			const definitions = await this.parseConfiguration(json);
+			// Parse configuration
+			const definitions = this.parseConfiguration(json);
 			
 			const result: ConfigurationLoadResult = {
 				definitions,
@@ -56,19 +51,13 @@ export class ConfigurationService implements IConfigurationService {
 			};
 
 			// Apply defaults for newly discovered settings
-			try {
-				await this.schemaService.applyDefaultsToUserSettings(definitions);
-			} catch {
-				// Ignore errors applying defaults
-			}
+			await ignoreErrors(() => this.schemaService.applyDefaultsToUserSettings(definitions));
 
 			// Notify listeners
 			this._onConfigurationChanged.fire(result);
-
 			return result;
 
-		} catch (error) {
-			// Return empty configuration on error
+		} catch {
 			const result: ConfigurationLoadResult = {
 				definitions: [],
 				source: 'local',
@@ -84,21 +73,12 @@ export class ConfigurationService implements IConfigurationService {
 	 * Start polling for remote configuration changes
 	 */
 	startPolling(): void {
-		if (this.pollTimer) {
-			return;
-		}
+		if (this.pollTimer) {return;}
 
-		const doCheck = async () => {
-			try {
-				await this.checkForRemoteUpdates();
-			} catch {
-				// Ignore polling errors
-			}
-		};
+		const checkForUpdates = () => ignoreErrors(() => this.checkForRemoteUpdates());
 
-		// Run immediately then schedule interval
-		void doCheck();
-		this.pollTimer = setInterval(() => void doCheck(), ConfigurationService.POLL_INTERVAL_MS);
+		void checkForUpdates();
+		this.pollTimer = setInterval(checkForUpdates, Constants.POLLING_INTERVAL_MS);
 		
 		this.disposables.push(new vscode.Disposable(() => {
 			if (this.pollTimer) {
@@ -122,42 +102,32 @@ export class ConfigurationService implements IConfigurationService {
 	 * Check for remote configuration updates without applying them
 	 */
 	async checkForRemoteUpdates(): Promise<boolean> {
-		try {
-			const remoteUrl = this.getRemoteConfigUrl();
-			if (!remoteUrl) {
-				await this.clearPendingFlag();
-				return false;
-			}
-
-			const rawText = await this.fetchRawRemoteConfig(remoteUrl);
-			if (!rawText) {
-				return false;
-			}
-
-			// Record check timestamp
-			await this.setLastChecked();
-
-			const lastKnownRaw = this.context.globalState.get<string>(ConfigurationService.GLOBAL_LAST_RAW);
-			
-			// If this is the first check, store the raw text
-			if (!lastKnownRaw) {
-				await this.context.globalState.update(ConfigurationService.GLOBAL_LAST_RAW, rawText);
-				await this.clearPendingFlag();
-				return false;
-			}
-
-			// Check if content has changed
-			if (lastKnownRaw !== rawText) {
-				await this.setPendingFlag();
-				return true;
-			}
-
+		const remoteUrl = this.getRemoteConfigUrl();
+		if (!remoteUrl) {
 			await this.clearPendingFlag();
 			return false;
+		}
 
-		} catch {
+		const rawText = await this.fetchRawRemoteConfig(remoteUrl);
+		if (!rawText) {return false;}
+
+		await this.setLastChecked();
+
+		const lastKnownRaw = this.context.globalState.get<string>(Constants.GLOBAL_KEYS.REMOTE_LAST_RAW);
+		
+		if (!lastKnownRaw) {
+			await this.context.globalState.update(Constants.GLOBAL_KEYS.REMOTE_LAST_RAW, rawText);
+			await this.clearPendingFlag();
 			return false;
 		}
+
+		if (lastKnownRaw !== rawText) {
+			await this.setPendingFlag();
+			return true;
+		}
+
+		await this.clearPendingFlag();
+		return false;
 	}
 
 	/**
@@ -166,21 +136,21 @@ export class ConfigurationService implements IConfigurationService {
 	async refreshConfiguration(): Promise<void> {
 		await this.loadConfiguration();
 		await this.clearPendingFlag();
-		await this.context.globalState.update(ConfigurationService.GLOBAL_LAST_RAW, null);
+		await this.context.globalState.update(Constants.GLOBAL_KEYS.REMOTE_LAST_RAW, null);
 	}
 
 	/**
 	 * Check if there are pending remote configuration changes
 	 */
 	hasPendingChanges(): boolean {
-		return !!this.context.globalState.get<boolean>(ConfigurationService.GLOBAL_PENDING_KEY);
+		return !!this.context.globalState.get<boolean>(Constants.GLOBAL_KEYS.REMOTE_PENDING);
 	}
 
 	/**
 	 * Get the last time remote configuration was checked
 	 */
 	getLastChecked(): string | null {
-		return this.context.globalState.get<string>(ConfigurationService.GLOBAL_LAST_CHECKED) || null;
+		return this.context.globalState.get<string>(Constants.GLOBAL_KEYS.REMOTE_LAST_CHECKED) || null;
 	}
 
 	/**
@@ -188,33 +158,19 @@ export class ConfigurationService implements IConfigurationService {
 	 */
 	dispose(): void {
 		this.stopPolling();
-		for (const disposable of this.disposables) {
-			try {
-				disposable.dispose();
-			} catch {
-				// Ignore disposal errors
-			}
-		}
+		this.disposables.forEach(d => ignoreErrors(() => d.dispose()));
 		this.disposables.length = 0;
 		this._onConfigurationChanged.dispose();
 	}
 
-	/**
-	 * Get the remote configuration URL from settings
-	 */
 	private getRemoteConfigUrl(): string {
 		return (vscode.workspace.getConfiguration().get<string>('onByDefault.remoteConfigUrl') || '').trim();
 	}
 
-	/**
-	 * Fetch and parse remote configuration
-	 */
-	private async fetchRemoteConfig(remoteUrl: string): Promise<any | null> {
+	private async loadRemoteConfig(remoteUrl: string): Promise<any | null> {
 		try {
 			const effective = await this.httpService.resolveToRawUrl(remoteUrl);
-			if (!effective) {
-				return null;
-			}
+			if (!effective) {return null;}
 
 			let content: string | null = null;
 
@@ -226,26 +182,16 @@ export class ConfigurationService implements IConfigurationService {
 				content = response.data;
 			}
 
-			if (!content) {
-				return null;
-			}
-
-			return JSON.parse(content);
-
+			return content ? safeJsonParse(content, null) : null;
 		} catch {
 			return null;
 		}
 	}
 
-	/**
-	 * Fetch raw remote configuration content for change detection
-	 */
 	private async fetchRawRemoteConfig(remoteUrl: string): Promise<string | null> {
 		try {
 			const effective = await this.httpService.resolveToRawUrl(remoteUrl);
-			if (!effective) {
-				return null;
-			}
+			if (!effective) {return null;}
 
 			if (effective.startsWith('gist:')) {
 				const gistId = effective.substring(5);
@@ -254,126 +200,115 @@ export class ConfigurationService implements IConfigurationService {
 				const response = await this.httpService.get({ url: effective, useCache: false });
 				return response.data;
 			}
-
 		} catch {
 			return null;
 		}
 	}
 
-	/**
-	 * Load bundled configuration from media/config.json
-	 */
 	private async loadBundledConfig(): Promise<any | null> {
 		try {
-			const configPath = path.join(this.context.extensionPath, 'media', 'config.json');
-			if (!fs.existsSync(configPath)) {
-				return null;
-			}
+			const configPath = path.join(this.context.extensionPath, 'media', Constants.FILES.CONFIG);
+			if (!fs.existsSync(configPath)) {return null;}
 
 			const raw = fs.readFileSync(configPath, 'utf8');
-			return JSON.parse(raw);
-
+			return safeJsonParse(raw, null);
 		} catch {
 			return null;
 		}
 	}
 
+	private async setPendingFlag(): Promise<void> {
+		await ignoreErrors(async () => 
+			await this.context.globalState.update(Constants.GLOBAL_KEYS.REMOTE_PENDING, true)
+		);
+	}
+
+	private async clearPendingFlag(): Promise<void> {
+		await ignoreErrors(async () => 
+			await this.context.globalState.update(Constants.GLOBAL_KEYS.REMOTE_PENDING, false)
+		);
+	}
+
+	private async setLastChecked(): Promise<void> {
+		await ignoreErrors(async () => 
+			await this.context.globalState.update(
+				Constants.GLOBAL_KEYS.REMOTE_LAST_CHECKED, 
+				new Date().toISOString()
+			)
+		);
+	}
+
 	/**
-	 * Parse configuration JSON into SettingDefinition array
+	 * Parse configuration JSON into setting definitions
 	 */
-	private async parseConfiguration(json: any): Promise<SettingDefinition[]> {
+	private parseConfiguration(json: any): SettingDefinition[] {
 		const definitions: SettingDefinition[] = [];
 
-		if (!json || !Array.isArray(json.settings)) {
+		if (!json?.settings || !Array.isArray(json.settings)) {
 			return definitions;
 		}
 
 		for (const entry of json.settings) {
-			if (!entry) {
+			if (!entry) {continue;}
+
+			// Grouped format: { group, settings: [...] }
+			if (this.isGroupedEntry(entry)) {
+				definitions.push(...this.parseGroupedEntry(entry));
 				continue;
 			}
 
-			// Handle grouped format: { group, settings: [...] }
-			if (typeof entry.group === 'string' && Array.isArray(entry.settings)) {
-				const groupName = entry.group;
-				const groupRequires = this.schemaService.normalizeRequires(
-					entry.requires || entry.requiresExtensions || entry.requiresExtension
-				);
-				const groupRecommended = entry.recommended; // Group-level recommended value
-
-				for (const setting of entry.settings) {
-					if (!setting || typeof setting.key !== 'string') {
-						continue;
-					}
-
-					const enriched = this.schemaService.enrichSettingDefinition(setting.key, {
-						...setting,
-						group: groupName,
-						// Individual setting recommended value overrides group-level
-						recommended: setting.recommended !== undefined ? setting.recommended : groupRecommended,
-						requires: this.schemaService.mergeRequires(
-							groupRequires,
-							this.schemaService.normalizeRequires(
-								setting.requires || setting.requiresExtensions || setting.requiresExtension
-							)
-						)
-					});
-
-					if (typeof setting.info === 'string') {
-						enriched.info = setting.info;
-					}
-
-					definitions.push(enriched);
-				}
-				continue;
-			}
-
-			// Handle single entry format: { key, ... }
-			if (typeof entry.key === 'string') {
-				const enriched = this.schemaService.enrichSettingDefinition(entry.key, entry);
-				if (typeof entry.info === 'string') {
-					enriched.info = entry.info;
-				}
-				definitions.push(enriched);
+			// Single entry format: { key, ... }
+			if (this.isSingleEntry(entry)) {
+				definitions.push(this.parseSingleEntry(entry));
 			}
 		}
 
 		return definitions;
 	}
 
-	/**
-	 * Set the pending changes flag
-	 */
-	private async setPendingFlag(): Promise<void> {
-		try {
-			await this.context.globalState.update(ConfigurationService.GLOBAL_PENDING_KEY, true);
-		} catch {
-			// Ignore storage errors
-		}
+	private isGroupedEntry(entry: any): boolean {
+		return typeof entry.group === 'string' && Array.isArray(entry.settings);
 	}
 
-	/**
-	 * Clear the pending changes flag
-	 */
-	private async clearPendingFlag(): Promise<void> {
-		try {
-			await this.context.globalState.update(ConfigurationService.GLOBAL_PENDING_KEY, false);
-		} catch {
-			// Ignore storage errors
-		}
+	private isSingleEntry(entry: any): boolean {
+		return typeof entry.key === 'string';
 	}
 
-	/**
-	 * Set the last checked timestamp
-	 */
-	private async setLastChecked(): Promise<void> {
-		try {
-			await this.context.globalState.update(
-				ConfigurationService.GLOBAL_LAST_CHECKED, 
-				new Date().toISOString()
-			);
-		} catch {
-			// Ignore storage errors
+	private parseGroupedEntry(entry: any): SettingDefinition[] {
+		const groupName = entry.group;
+		const groupRequires = this.schemaService.normalizeRequires(
+			entry.requires || entry.requiresExtensions || entry.requiresExtension
+		);
+		const groupRecommended = entry.recommended;
+
+		return entry.settings
+			.filter((setting: any) => setting && typeof setting.key === 'string')
+			.map((setting: any) => this.enrichSetting(setting, {
+				group: groupName,
+				recommended: setting.recommended ?? groupRecommended,
+				requires: this.schemaService.mergeRequires(
+					groupRequires,
+					this.schemaService.normalizeRequires(
+						setting.requires || setting.requiresExtensions || setting.requiresExtension
+					)
+				)
+			}));
+	}
+
+	private parseSingleEntry(entry: any): SettingDefinition {
+		return this.enrichSetting(entry);
+	}
+
+	private enrichSetting(setting: any, overrides: Partial<SettingDefinition> = {}): SettingDefinition {
+		const enriched = this.schemaService.enrichSettingDefinition(setting.key, {
+			...setting,
+			...overrides
+		});
+
+		if (typeof setting.info === 'string') {
+			enriched.info = setting.info;
 		}
+
+		return enriched;
 	}
 }

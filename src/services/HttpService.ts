@@ -1,73 +1,57 @@
+import * as vscode from 'vscode';
 import * as https from 'https';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as vscode from 'vscode';
 import { URL } from 'url';
 import { IHttpService, HttpRequestOptions, HttpResponse } from '../types';
+import { Constants } from '../constants';
+import { isValidHttpUrl, extractGistId, createSafeFilename, ignoreErrorsSync, safeJsonParse } from '../utils/common';
 
 /**
- * Service for handling HTTP requests with caching and error handling
+ * HTTP service for making requests with caching and GitHub Gist support
  */
 export class HttpService implements IHttpService {
-	private static readonly DEFAULT_TIMEOUT = 9000;
-	private static readonly USER_AGENT = 'on-by-default-ext';
-
 	constructor(private readonly context: vscode.ExtensionContext) {}
 
 	/**
 	 * Make an HTTP GET request with optional caching
 	 */
 	async get(options: HttpRequestOptions): Promise<HttpResponse> {
-		const { url, headers = {}, timeout = HttpService.DEFAULT_TIMEOUT, useCache = true } = options;
+		const { url, headers = {}, timeout = Constants.HTTP_TIMEOUT_MS, useCache = true } = options;
 
-		if (!/^https?:\/\//i.test(url)) {
-			throw new Error('Invalid URL: must be HTTP or HTTPS');
-		}
-
-		const requestHeaders: Record<string, string> = {
-			'User-Agent': HttpService.USER_AGENT,
-			'Accept': 'application/json',
-			...headers
-		};
-
-		// Handle caching with ETag if enabled
-		let etagKey: string | undefined;
-		let cacheFile: string | undefined;
-		
+		// Check cache first if enabled
+		const requestHeaders = { ...headers };
 		if (useCache) {
-			etagKey = `http.etag:${url}`;
-			const cacheDir = this.getCacheDirectory();
-			cacheFile = path.join(cacheDir, this.getCacheFileName(url));
-			
-			const prevEtag = this.context.globalState.get<string>(etagKey);
+			const prevEtag = this.getStoredEtag(url);
 			if (prevEtag) {
 				requestHeaders['If-None-Match'] = prevEtag;
 			}
 		}
 
 		try {
-			const urlObj = new URL(url);
-			const response = await this.makeHttpRequest(urlObj, requestHeaders, timeout);
+			const response = await this.makeRequest(url, requestHeaders, timeout);
 
 			// Handle 304 Not Modified
-			if (response.status === 304 && cacheFile && fs.existsSync(cacheFile)) {
-				const cachedData = fs.readFileSync(cacheFile, 'utf8');
-				return {
-					data: cachedData,
-					headers: response.headers,
-					status: 200,
-					fromCache: true,
-					etag: response.headers['etag']
-				};
+			if (response.status === 304 && useCache) {
+				const cachedData = this.getCachedResponse(url);
+				if (cachedData) {
+					return {
+						data: cachedData,
+						headers: response.headers,
+						status: 200,
+						fromCache: true,
+						etag: response.headers['etag']
+					};
+				}
 			}
 
 			if (response.status < 200 || response.status >= 300) {
-				throw new Error(`HTTP ${response.status}`);
+				throw new Error(`HTTP ${response.status}: Failed to fetch ${url}`);
 			}
 
 			// Cache successful response
-			if (useCache && cacheFile && response.data) {
-				await this.cacheResponse(cacheFile, response.data, etagKey!, response.headers['etag']);
+			if (useCache && response.data) {
+				await this.storeResponse(url, response.data, response.headers['etag']);
 			}
 
 			return {
@@ -80,14 +64,16 @@ export class HttpService implements IHttpService {
 
 		} catch (error) {
 			// Try to return cached data on error
-			if (useCache && cacheFile && fs.existsSync(cacheFile)) {
-				const cachedData = fs.readFileSync(cacheFile, 'utf8');
-				return {
-					data: cachedData,
-					headers: {},
-					status: 200,
-					fromCache: true
-				};
+			if (useCache) {
+				const cachedData = this.getCachedResponse(url);
+				if (cachedData) {
+					return {
+						data: cachedData,
+						headers: {},
+						status: 200,
+						fromCache: true
+					};
+				}
 			}
 			throw error;
 		}
@@ -97,37 +83,16 @@ export class HttpService implements IHttpService {
 	 * Fetch content from a GitHub Gist
 	 */
 	async fetchGistContent(gistId: string): Promise<string | null> {
+		const apiUrl = `https://api.github.com/gists/${gistId}`;
+		
 		try {
-			const apiUrl = `https://api.github.com/gists/${gistId}`;
-			const cacheKey = `gist.etag:${gistId}`;
-			const cacheDir = this.getCacheDirectory();
-			const cacheFile = path.join(cacheDir, `gist-${gistId}.json`);
+			const response = await this.get({
+				url: apiUrl,
+				headers: { 'Accept': 'application/vnd.github.v3+json' },
+				useCache: false
+			});
 
-			const headers: Record<string, string> = {
-				'Accept': 'application/vnd.github.v3+json'
-			};
-
-			const prevEtag = this.context.globalState.get<string>(cacheKey);
-			if (prevEtag) {
-				headers['If-None-Match'] = prevEtag;
-			}
-
-			const urlObj = new URL(apiUrl);
-			const response = await this.makeHttpRequest(urlObj, headers, HttpService.DEFAULT_TIMEOUT);
-
-			// Handle 304 Not Modified
-			if (response.status === 304) {
-				if (fs.existsSync(cacheFile)) {
-					return fs.readFileSync(cacheFile, 'utf8');
-				}
-				return null;
-			}
-
-			if (response.status < 200 || response.status >= 300) {
-				return null;
-			}
-
-			const parsed = JSON.parse(response.data);
+			const parsed: any = safeJsonParse(response.data, {});
 			const files = parsed?.files || {};
 			
 			// Look for config.json first, then any .json file
@@ -139,21 +104,7 @@ export class HttpService implements IHttpService {
 				}
 			}
 
-			if (!targetFile || !targetFile.content) {
-				return null;
-			}
-
-			// Cache the content and etag
-			if (response.headers['etag']) {
-				await this.context.globalState.update(cacheKey, response.headers['etag']);
-				try {
-					fs.writeFileSync(cacheFile, targetFile.content, 'utf8');
-				} catch {
-					// Ignore cache write errors
-				}
-			}
-
-			return targetFile.content;
+			return targetFile?.content || null;
 
 		} catch {
 			return null;
@@ -164,45 +115,78 @@ export class HttpService implements IHttpService {
 	 * Resolve a URL to its raw form, handling GitHub Gist URLs specially
 	 */
 	async resolveToRawUrl(url: string): Promise<string | null> {
-		if (!url) {
-			return null;
-		}
+		return this.resolveToRaw(url);
+	}
 
-		// Check for GitHub raw URLs (keep as-is, no API needed)
+	/**
+	 * Fetch data from URL with caching (simplified interface)
+	 */
+	async fetch(url: string): Promise<string> {
+		const response = await this.get({ url, useCache: true });
+		return response.data;
+	}
+
+	/**
+	 * Check if cached version is current
+	 */
+	async isCurrentVersion(url: string): Promise<boolean> {
+		const storedEtag = this.getStoredEtag(url);
+		if (!storedEtag) {return false;}
+
+		try {
+			const response = await this.get({ 
+				url,
+				headers: { 'If-None-Match': storedEtag },
+				useCache: false
+			});
+			return response.status === 304;
+		} catch {
+			return false;
+		}
+	}
+
+	private resolveToRaw(url: string): string | null {
+		if (!url) {return null;}
+
+		// GitHub raw URLs (keep as-is)
 		if (url.includes('githubusercontent.com') && url.includes('/raw/')) {
 			return url.split('#')[0];
 		}
 
-		// Check for GitHub Gist URLs that need to be converted to raw format
-		const gistMatch = url.match(/gist\.github\.com\/(?:[^\/]+\/)?([0-9a-fA-F]{6,})/i);
-		if (gistMatch && gistMatch[1]) {
-			// Convert to raw URL format instead of using API
-			return `https://gist.githubusercontent.com/${gistMatch[1]}/raw/config.json`;
+		// GitHub Gist URLs (convert to raw format)
+		const gistId = extractGistId(url);
+		if (gistId) {
+			return `https://gist.githubusercontent.com/${gistId}/raw/config.json`;
 		}
 
-		// For regular URLs, keep query parameters but strip hash
+		// Regular URLs (strip hash)
 		return url.split('#')[0];
 	}
 
-	/**
-	 * Make the actual HTTP request
-	 */
-	private makeHttpRequest(
-		urlObj: URL, 
-		headers: Record<string, string>, 
-		timeout: number
-	): Promise<{ data: string; headers: Record<string, string>; status: number }> {
+	private async makeRequest(url: string, headers: Record<string, string> = {}, timeout: number = Constants.HTTP_TIMEOUT_MS): Promise<{data: string, headers: Record<string, string>, status: number}> {
+		if (!isValidHttpUrl(url)) {
+			throw new Error('Invalid URL: must be HTTP or HTTPS');
+		}
+
+		const requestHeaders = {
+			'User-Agent': Constants.USER_AGENT,
+			'Accept': 'application/json',
+			...headers
+		};
+
+		const urlObj = new URL(url);
+		
 		return new Promise((resolve, reject) => {
 			const req = https.request({
 				hostname: urlObj.hostname,
 				path: urlObj.pathname + (urlObj.search || ''),
 				method: 'GET',
-				headers,
+				headers: requestHeaders,
 				port: urlObj.port ? Number(urlObj.port) : 443,
 				timeout
 			}, (res) => {
 				const chunks: Buffer[] = [];
-				res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+				res.on('data', chunk => chunks.push(Buffer.from(chunk)));
 				res.on('end', () => {
 					resolve({
 						data: Buffer.concat(chunks).toString('utf8'),
@@ -218,49 +202,39 @@ export class HttpService implements IHttpService {
 		});
 	}
 
-	/**
-	 * Get the cache directory, creating it if necessary
-	 */
+	private getCachedResponse(url: string): string | null {
+		const cacheFile = this.getCacheFile(url);
+		if (!fs.existsSync(cacheFile)) {return null;}
+
+		return ignoreErrorsSync(() => fs.readFileSync(cacheFile, 'utf8')) || null;
+	}
+
+	private async storeResponse(url: string, data: string, etag?: string): Promise<void> {
+		const cacheFile = this.getCacheFile(url);
+		ignoreErrorsSync(() => fs.writeFileSync(cacheFile, data, 'utf8'));
+		
+		if (etag) {
+			const key = `http.etag:${url}`;
+			await this.context.globalState.update(key, etag);
+		}
+	}
+
+	private getStoredEtag(url: string): string | null {
+		const key = `http.etag:${url}`;
+		return this.context.globalState.get<string>(key) || null;
+	}
+
+	private getCacheFile(url: string): string {
+		const cacheDir = this.getCacheDirectory();
+		const filename = createSafeFilename(url, Constants.CACHE_FILE_PREFIX, '.json');
+		return path.join(cacheDir, filename);
+	}
+
 	private getCacheDirectory(): string {
 		const cacheDir = this.context.globalStorageUri?.fsPath || 
 			path.join(this.context.extensionPath, 'media');
 		
-		try {
-			fs.mkdirSync(cacheDir, { recursive: true });
-		} catch {
-			// Ignore errors creating cache directory
-		}
-		
+		ignoreErrorsSync(() => fs.mkdirSync(cacheDir, { recursive: true }));
 		return cacheDir;
-	}
-
-	/**
-	 * Generate a safe cache file name from a URL
-	 */
-	private getCacheFileName(url: string): string {
-		// Create a safe filename from the URL
-		const urlHash = Buffer.from(url).toString('base64')
-			.replace(/[^a-zA-Z0-9]/g, '')
-			.substring(0, 32);
-		return `remote-config-${urlHash}.json`;
-	}
-
-	/**
-	 * Cache response data and etag
-	 */
-	private async cacheResponse(
-		cacheFile: string, 
-		data: string, 
-		etagKey: string, 
-		etag?: string
-	): Promise<void> {
-		try {
-			fs.writeFileSync(cacheFile, data, 'utf8');
-			if (etag) {
-				await this.context.globalState.update(etagKey, etag);
-			}
-		} catch {
-			// Ignore cache write errors
-		}
 	}
 }

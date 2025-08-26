@@ -11,141 +11,147 @@ export class SchemaInferenceService implements ISchemaInferenceService {
 	 * Enrich a setting definition by inferring details from VS Code extension schemas
 	 */
 	enrichSettingDefinition(key: string, config: any): SettingDefinition {
-		// Find schema for this key
 		const found = this.findSchemaForKey(key);
 		const schema = found?.schema;
 		const group = config.group || this.deriveGroupFromKey(key);
 		const label = config.title || key.split('.').slice(-1)[0];
 
+		// Start with schema-inferred properties
+		let properties = this.inferFromSchema(schema, found, config.default);
+		
+		// Refine with current configuration values
+		properties = this.refineFromConfiguration(key, properties);
+		
+		// Apply explicit config overrides
+		properties = this.applyConfigOverrides(config, properties);
+
+		return {
+			key,
+			title: label,
+			description: config.description || label,
+			group,
+			recommended: config.recommended,
+			...properties
+		};
+	}
+
+	private inferFromSchema(schema: any, found: SchemaLookupResult | undefined, configDefault: any) {
 		let type: SettingDefinition['type'] = 'string';
 		let options: Array<{ value: string; label?: string }> | undefined = undefined;
 		let min: number | undefined = undefined;
 		let max: number | undefined = undefined;
 		let step: number | undefined = undefined;
 		let requires: string[] | undefined = undefined;
-		let defaultVal: any = config.default;
+		let defaultVal: any = configDefault;
 
-		// Infer from schema if available
-		if (schema) {
-			const sType = Array.isArray(schema.type) ? schema.type[0] : schema.type;
-			
-			if (sType === 'boolean') {
-				type = 'boolean';
-			} else if (sType === 'number' || sType === 'integer') {
-				type = 'number';
-				step = sType === 'integer' ? 1 : undefined;
-			} else if (sType === 'object' || sType === 'array') {
-				type = 'json';
-			} else {
-				type = 'string';
-			}
-
-			// Handle enum values
-			if (schema.enum && Array.isArray(schema.enum)) {
-				options = schema.enum.map((v: any, i: number) => ({
-					value: String(v),
-					label: Array.isArray(schema.enumDescriptions) ? schema.enumDescriptions[i] : undefined
-				}));
-			} else if (schema.oneOf || schema.anyOf) {
-				const alts = (schema.oneOf || schema.anyOf) as any[];
-				const enums = alts
-					.filter(e => e && (e.const !== undefined || e.enum))
-					.map(e => e.const ?? (Array.isArray(e.enum) ? e.enum[0] : undefined))
-					.filter(v => v !== undefined);
-				if (enums.length) {
-					options = enums.map(v => ({ value: String(v) }));
-				}
-			}
-
-			// Handle numeric constraints
-			if (typeof schema.minimum === 'number') {
-				min = schema.minimum;
-			}
-			if (typeof schema.maximum === 'number') {
-				max = schema.maximum;
-			}
-
-			// Set extension requirement if from different extension
-			if (found && found.extensionId && found.extensionId !== this.context.extension.id) {
-				requires = [found.extensionId];
-			}
-
-			// Use schema default if no explicit default provided
-			if (defaultVal === undefined && schema.default !== undefined) {
-				defaultVal = schema.default;
-			}
+		if (!schema) {
+			return { type, options, min, max, step, requires, default: defaultVal };
 		}
 
-		// Inspect current configuration values to refine type information
+		// Infer type
+		const sType = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+		if (sType === 'boolean') {
+			type = 'boolean';
+		} else if (sType === 'number' || sType === 'integer') {
+			type = 'number';
+			step = sType === 'integer' ? 1 : undefined;
+		} else if (sType === 'object' || sType === 'array') {
+			type = 'json';
+		}
+
+		// Extract enum options
+		options = this.extractEnumOptions(schema);
+
+		// Extract numeric constraints
+		if (typeof schema.minimum === 'number') {min = schema.minimum;}
+		if (typeof schema.maximum === 'number') {max = schema.maximum;}
+
+		// Set extension requirement
+		if (found?.extensionId && found.extensionId !== this.context.extension.id) {
+			requires = [found.extensionId];
+		}
+
+		// Use schema default
+		if (defaultVal === undefined && schema.default !== undefined) {
+			defaultVal = schema.default;
+		}
+
+		return { type, options, min, max, step, requires, default: defaultVal };
+	}
+
+	private extractEnumOptions(schema: any): Array<{ value: string; label?: string }> | undefined {
+		if (schema.enum && Array.isArray(schema.enum)) {
+			return schema.enum.map((v: any, i: number) => ({
+				value: String(v),
+				label: Array.isArray(schema.enumDescriptions) ? schema.enumDescriptions[i] : undefined
+			}));
+		}
+
+		if (schema.oneOf || schema.anyOf) {
+			const alts = (schema.oneOf || schema.anyOf) as any[];
+			const enums = alts
+				.filter(e => e && (e.const !== undefined || e.enum))
+				.map(e => e.const ?? (Array.isArray(e.enum) ? e.enum[0] : undefined))
+				.filter(v => v !== undefined);
+			
+			return enums.length ? enums.map(v => ({ value: String(v) })) : undefined;
+		}
+
+		return undefined;
+	}
+
+	private refineFromConfiguration(key: string, properties: any) {
 		try {
 			const info = vscode.workspace.getConfiguration().inspect<any>(key);
 			const sample = info?.globalValue ?? info?.workspaceValue ?? 
 				info?.workspaceFolderValue ?? info?.defaultValue;
 			
-			if (sample !== undefined) {
-				const t = typeof sample;
-				if (t === 'boolean') {
-					type = 'boolean';
-				} else if (t === 'number') {
-					type = 'number';
-					if (Number.isInteger(sample) && step === undefined) {
-						step = 1;
-					}
-				} else if (t === 'object' && sample !== null) {
-					type = 'json';
-				} else {
-					type = 'string';
-				}
+			if (sample === undefined) {return properties;}
 
-				// Use configuration default if no other default found
-				if (defaultVal === undefined && info?.defaultValue !== undefined) {
-					defaultVal = info.defaultValue;
+			const t = typeof sample;
+			if (t === 'boolean') {
+				properties.type = 'boolean';
+			} else if (t === 'number') {
+				properties.type = 'number';
+				if (Number.isInteger(sample) && properties.step === undefined) {
+					properties.step = 1;
 				}
+			} else if (t === 'object' && sample !== null) {
+				properties.type = 'json';
+			} else {
+				properties.type = 'string';
+			}
+
+			// Use configuration default if no other default found
+			if (properties.default === undefined && info?.defaultValue !== undefined) {
+				properties.default = info.defaultValue;
 			}
 		} catch {
 			// Ignore configuration inspection errors
 		}
 
-		// Apply overrides from config
-		if (config.type) {
-			type = config.type;
-		}
+		return properties;
+	}
+
+	private applyConfigOverrides(config: any, properties: any) {
+		if (config.type) {properties.type = config.type;}
+		if (config.min !== undefined) {properties.min = config.min;}
+		if (config.max !== undefined) {properties.max = config.max;}
+		if (config.step !== undefined) {properties.step = config.step;}
+		if (config.default !== undefined) {properties.default = config.default;}
+		
 		if (config.options && config.options.length) {
-			options = config.options.map((o: any) => ({
+			properties.options = config.options.map((o: any) => ({
 				value: String(o.value),
 				label: o.label
 			}));
 		}
-		if (config.min !== undefined) {
-			min = config.min;
-		}
-		if (config.max !== undefined) {
-			max = config.max;
-		}
-		if (config.step !== undefined) {
-			step = config.step;
-		}
+		
 		if (config.requires && config.requires.length) {
-			requires = this.normalizeRequires(config.requires);
-		}
-		if (config.default !== undefined) {
-			defaultVal = config.default;
+			properties.requires = this.normalizeRequires(config.requires);
 		}
 
-		return {
-			key,
-			type,
-			title: label,
-			description: config.description || label,
-			group,
-			min,
-			max,
-			step,
-			options,
-			requires,
-			default: defaultVal,
-			recommended: config.recommended
-		};
+		return properties;
 	}
 
 	/**
@@ -206,49 +212,48 @@ export class SchemaInferenceService implements ISchemaInferenceService {
 	 */
 	async applyDefaultsToUserSettings(definitions: SettingDefinition[]): Promise<void> {
 		for (const def of definitions) {
+			if (!this.shouldApplyDefault(def)) {continue;}
+			
+			const valueToSet = this.getDefaultValue(def);
+			if (valueToSet === undefined) {continue;}
+
 			try {
-				// Skip if required extensions are not installed
-				if (def.requires && def.requires.length) {
-					const anyMissing = def.requires.some(r => !vscode.extensions.getExtension(r));
-					if (anyMissing) {
-						continue;
-					}
-				}
-
-				const info = vscode.workspace.getConfiguration().inspect<any>(def.key);
-				
-				// Skip if user has explicitly set the value at any scope
-				if (info?.globalValue !== undefined || 
-					info?.workspaceValue !== undefined || 
-					info?.workspaceFolderValue !== undefined) {
-					continue;
-				}
-
-				let valueToSet: any = undefined;
-
-				if (def.default !== undefined) {
-					valueToSet = def.default;
-				} else if (def.type === 'boolean') {
-					// Default boolean settings to enabled for "always on" behavior
-					valueToSet = true;
-				} else if (def.type === 'number') {
-					valueToSet = def.min !== undefined ? def.min : 1;
-				} else if (def.type === 'string' && def.options && def.options.length) {
-					valueToSet = def.options[0].value;
-				}
-
-				if (valueToSet !== undefined) {
-					await vscode.workspace.getConfiguration().update(
-						def.key, 
-						valueToSet, 
-						vscode.ConfigurationTarget.Global
-					);
-				}
-
+				await vscode.workspace.getConfiguration().update(
+					def.key, 
+					valueToSet, 
+					vscode.ConfigurationTarget.Global
+				);
 			} catch {
 				// Ignore errors applying defaults
 			}
 		}
+	}
+
+	private shouldApplyDefault(def: SettingDefinition): boolean {
+		// Skip if required extensions are not installed
+		if (def.requires?.some(r => !vscode.extensions.getExtension(r))) {
+			return false;
+		}
+
+		try {
+			const info = vscode.workspace.getConfiguration().inspect<any>(def.key);
+			// Skip if user has explicitly set the value at any scope
+			return !(info?.globalValue !== undefined || 
+				info?.workspaceValue !== undefined || 
+				info?.workspaceFolderValue !== undefined);
+		} catch {
+			return false;
+		}
+	}
+
+	private getDefaultValue(def: SettingDefinition): any {
+		if (def.default !== undefined) {return def.default;}
+		
+		if (def.type === 'boolean') {return true;} // Default to enabled for "always on" behavior
+		if (def.type === 'number') {return def.min !== undefined ? def.min : 1;}
+		if (def.type === 'string' && def.options?.length) {return def.options[0].value;}
+		
+		return undefined;
 	}
 
 	/**
